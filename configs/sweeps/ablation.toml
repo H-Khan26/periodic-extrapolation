@@ -1,0 +1,8 @@
+name = "ablation"
+base = "configs/base.toml"
+jobs = 4
+overrides = ["model.baselines=['harmonic_random_init','harmonic_offset_init','oracle']"]
+
+[grid]
+"data.target" = ["sin", "harmonics3", "square", "sin30"]
+seed = [0, 1, 2]

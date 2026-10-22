@@ -171,6 +171,13 @@ def load_config(path: str | Path | None = None, overrides: list[str] | None = No
     return cfg
 
 
+def config_from_dict(data: dict[str, Any]) -> Config:
+    """Rebuild a Config from the dict written by :func:`to_dict` (a run's config.json)."""
+    cfg = _build(Config, data, "")
+    validate(cfg)
+    return cfg
+
+
 def validate(cfg: Config) -> None:
     d = cfg.data
     if d.x_max <= d.x_min:

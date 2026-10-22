@@ -6,7 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from periodic.config import Config, ConfigError, config_hash, load_config, to_dict
+from periodic.config import (
+    Config,
+    ConfigError,
+    config_from_dict,
+    config_hash,
+    load_config,
+    to_dict,
+)
 
 
 def test_defaults_load_without_a_file() -> None:
@@ -77,6 +84,14 @@ def test_bad_values_are_errors(override: str) -> None:
 def test_validation_rejects_inconsistent_configs(override: str) -> None:
     with pytest.raises(ConfigError):
         load_config(None, [override])
+
+
+def test_to_dict_round_trips_through_config_from_dict() -> None:
+    cfg = load_config(None, ["data.target=square", 'model.heads=["mlp"]', "eval.dense_points=7"])
+    back = config_from_dict(to_dict(cfg))
+    assert back == cfg
+    with pytest.raises(ConfigError, match="unknown key"):
+        config_from_dict({"nope": 1})
 
 
 def test_hash_is_stable_and_content_sensitive() -> None:

@@ -1,9 +1,10 @@
-"""Models: the periodic-by-construction harmonic regressor and, later, the baselines."""
+"""Models: the periodic-by-construction harmonic regressor and the baselines."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from periodic.models import baselines as _baselines  # noqa: F401  (registers the baselines)
 from periodic.models import harmonic as _harmonic  # noqa: F401  (registers "harmonic")
 from periodic.models.base import MODELS, FitResult, Regressor, load_state, mse
 

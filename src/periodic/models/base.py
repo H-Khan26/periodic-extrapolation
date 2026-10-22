@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 
 from periodic.registry import Registry
+from periodic.runs import write_json
 
 if TYPE_CHECKING:
     from periodic.config import Config
@@ -61,7 +62,7 @@ class Regressor(ABC):
 
     @abstractmethod
     def state(self) -> dict[str, Any]:
-        """Flat dict of JSON scalars/lists plus numpy arrays; everything needed to predict."""
+        """Flat dict of scalars/lists (numpy scalars allowed) plus arrays; enough to predict."""
 
     @classmethod
     @abstractmethod
@@ -74,9 +75,7 @@ class Regressor(ABC):
         arrays = {k: np.asarray(v) for k, v in state.items() if isinstance(v, np.ndarray)}
         scalars = {k: v for k, v in state.items() if not isinstance(v, np.ndarray)}
         np.savez(path / "arrays.npz", **arrays)  # type: ignore[arg-type]
-        (path / "model.json").write_text(
-            json.dumps({"class": self.name, "state": scalars}, indent=2), encoding="utf-8"
-        )
+        write_json(path / "model.json", {"class": self.name, "state": scalars})
 
 
 MODELS: Registry[type[Regressor]] = Registry("model")

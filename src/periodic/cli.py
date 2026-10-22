@@ -64,6 +64,51 @@ def cmd_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from periodic.evaluate import evaluate_run
+
+    run_dir = Path(args.run)
+    evaluate_run(run_dir, seed=args.seed)
+    if not args.no_figures:
+        from periodic.plots import plot_run
+
+        for p in plot_run(run_dir):
+            print(p)
+    return 0
+
+
+def cmd_sweep(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from periodic.report import report
+    from periodic.sweep import run_sweep
+
+    out = run_sweep(Path(args.spec), Path(args.out_root))
+    report(out)
+    if not args.no_figures:
+        from periodic.plots import plot_sweep
+
+        for p in plot_sweep(out):
+            print(p)
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from periodic.report import report
+
+    report(Path(args.sweep))
+    if not args.no_figures:
+        from periodic.plots import plot_sweep
+
+        for p in plot_sweep(Path(args.sweep)):
+            print(p)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="periodic", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -84,6 +129,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--x-file", default=None, help=".npy or text file of inputs")
     p.add_argument("--out", default=None, help="write predictions to this .npy instead of stdout")
     p.set_defaults(func=cmd_predict)
+
+    p = sub.add_parser("evaluate", help="score a run far outside the window and draw figures")
+    p.add_argument("--run", required=True, help="run directory written by train")
+    p.add_argument("--seed", type=int, default=1234, help="seed for the evaluation points")
+    p.add_argument("--no-figures", action="store_true")
+    p.set_defaults(func=cmd_evaluate)
+
+    p = sub.add_parser("sweep", help="train + evaluate a grid of configs, collect results.csv")
+    p.add_argument("--spec", required=True, help="sweep TOML (see configs/sweeps/)")
+    p.add_argument("--out-root", default="reports", help="where <name>/ is written")
+    p.add_argument("--no-figures", action="store_true")
+    p.set_defaults(func=cmd_sweep)
+
+    p = sub.add_parser("report", help="re-aggregate a finished sweep and redraw its figures")
+    p.add_argument("--sweep", required=True, help="sweep output directory (reports/<name>)")
+    p.add_argument("--no-figures", action="store_true")
+    p.set_defaults(func=cmd_report)
     return parser
 
 

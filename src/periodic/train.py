@@ -151,7 +151,10 @@ def _fit_baseline(name: str, cfg: Config, ds: Dataset, run_dir: Path) -> dict[st
     """Fit one registered baseline on the full window. The oracle receives the true period."""
     extra: dict[str, Any] = {}
     if name.startswith("oracle"):
-        extra["period"] = get_target(cfg.data.target).period
+        period = get_target(cfg.data.target).period
+        if period is None:
+            return {"skipped": "target has no true period", "train_mse": math.nan}
+        extra["period"] = period
     model: Regressor = MODELS.get(name).from_config(cfg, cfg.seed, **extra)
     t0 = time.perf_counter()
     res = model.fit(ds.x, ds.y)

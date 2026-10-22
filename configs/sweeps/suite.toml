@@ -1,0 +1,14 @@
+name = "suite"
+base = "configs/base.toml"
+jobs = 4
+overrides = [
+  "model.baselines=['constant','relu_mlp','snake','rff','gp_periodic','oracle']",
+]
+
+[grid]
+"data.target" = [
+  "sin", "harmonics3", "missing_fundamental", "bessel", "bumps",
+  "triangle", "abs_sin", "square", "sawtooth", "pwm20",
+  "sin30", "sin_eighth", "one_cycle", "random_fourier", "scaled", "quasi",
+]
+seed = [0, 1, 2, 3, 4]

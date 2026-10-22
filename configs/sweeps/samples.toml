@@ -1,0 +1,9 @@
+name = "samples"
+base = "configs/base.toml"
+jobs = 4
+overrides = ["model.baselines=['oracle']"]
+
+[grid]
+"data.target" = ["sin", "square"]
+"data.n_samples" = [64, 256, 1024, 4096, 16384]
+seed = [0, 1, 2]
