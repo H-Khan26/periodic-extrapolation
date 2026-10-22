@@ -22,7 +22,7 @@ test-all:         ## full test suite including slow tests
 	uv run pytest -n auto
 
 smoke:            ## end-to-end run on a tiny config
-	uv run periodic generate --config configs/smoke.toml
+	uv run periodic train --config configs/smoke.toml
 
 clean:
 	rm -rf runs/smoke .pytest_cache .mypy_cache .ruff_cache

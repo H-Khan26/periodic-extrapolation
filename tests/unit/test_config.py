@@ -53,7 +53,7 @@ def test_unknown_key_is_an_error(tmp_path: Path) -> None:
     [
         "data.n_samples=abc",
         "data.n_samples=1.5",
-        "model.joint_refine=1",
+        "model.mlp_lbfgs=1",
         "model.heads=linear",
         "nokey",
     ],

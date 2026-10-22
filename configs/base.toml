@@ -24,7 +24,7 @@ mlp_width = 64
 mlp_depth = 2
 mlp_epochs = 3000
 mlp_lr = 3e-3
-joint_refine = true
+mlp_lbfgs = true
 baselines = []
 
 [eval]

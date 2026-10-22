@@ -33,6 +33,37 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_train(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from periodic.train import train
+
+    cfg = load_config(args.config, args.overrides)
+    train(cfg, run_dir=Path(args.run_dir) if args.run_dir else None)
+    return 0
+
+
+def cmd_predict(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    import numpy as np
+
+    from periodic.inference import predict
+
+    if args.x_file:
+        path = Path(args.x_file)
+        xs = np.load(path) if path.suffix == ".npy" else np.loadtxt(path)
+    else:
+        xs = np.asarray([float(v) for v in args.x], dtype=np.float64)
+    ys = predict(Path(args.run), np.atleast_1d(xs))
+    if args.out:
+        np.save(args.out, ys)
+    else:
+        for xv, yv in zip(np.atleast_1d(xs), ys, strict=True):
+            print(f"{float(xv)!r}\t{float(yv)!r}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="periodic", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -41,6 +72,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_args(p)
     p.add_argument("--no-cache", action="store_true")
     p.set_defaults(func=cmd_generate)
+
+    p = sub.add_parser("train", help="estimate ω, fit and select a head, save a run directory")
+    _add_config_args(p)
+    p.add_argument("--run-dir", default=None, help="write here instead of a timestamped dir")
+    p.set_defaults(func=cmd_train)
+
+    p = sub.add_parser("predict", help="predict with a saved run at the given inputs")
+    p.add_argument("--run", required=True, help="run directory (or its model/ subdirectory)")
+    p.add_argument("--x", nargs="*", default=[], help="input values")
+    p.add_argument("--x-file", default=None, help=".npy or text file of inputs")
+    p.add_argument("--out", default=None, help="write predictions to this .npy instead of stdout")
+    p.set_defaults(func=cmd_predict)
     return parser
 
 

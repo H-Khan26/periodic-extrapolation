@@ -57,7 +57,7 @@ class ModelConfig:
     mlp_depth: int = 2
     mlp_epochs: int = 3000
     mlp_lr: float = 3e-3
-    joint_refine: bool = True
+    mlp_lbfgs: bool = True
     baselines: tuple[str, ...] = ()
 
 
