@@ -1,0 +1,19 @@
+name = "smoke"
+seed = 0
+out_dir = "runs/smoke"
+
+[data]
+target = "sin"
+n_samples = 512
+
+[spectral]
+oversample = 4
+n_candidates = 4
+
+[model]
+heads = ["linear"]
+mlp_epochs = 50
+
+[eval]
+points_per_band = 200
+dense_points = 100
