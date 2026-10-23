@@ -1,6 +1,6 @@
 name = "ablation"
 base = "configs/base.toml"
-jobs = 4
+jobs = 8
 overrides = ["model.baselines=['harmonic_random_init','harmonic_offset_init','oracle']"]
 
 [grid]

@@ -30,7 +30,14 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, ExpSineSquared, WhiteKernel
 
 from periodic.config import SpectralConfig
-from periodic.features import TWO_PI, design_matrix, harmonic_design, nyquist_omega, phase
+from periodic.features import (
+    TWO_PI,
+    design_matrix,
+    harmonic_design,
+    max_harmonics,
+    nyquist_omega,
+    phase,
+)
 from periodic.models.base import MODELS, FitResult, Regressor, mse
 from periodic.spectral import estimate_omega, harmonic_sum_scan
 
@@ -632,7 +639,7 @@ class OracleRegressor(Regressor):
     """Fourier least squares at the true period: an evaluation reference, not a submission model.
 
     The training code passes the target's period as ``extra["period"]``. Harmonics run from 1 to
-    k_max, capped at (n - 1) // 4 so the 2K + 1 coefficients use at most half the samples; beyond
+    k_max, capped by max_harmonics(n) so the fit stays overdetermined on small samples; beyond
     that the least-squares system is underdetermined or badly conditioned.
     """
 
@@ -665,7 +672,7 @@ class OracleRegressor(Regressor):
         t0 = time.perf_counter()
         x, y = _flat(x), _flat(y)
         self.x_center = _center_and_half_width(x)[0]
-        n_harm = max(1, min(self.k_max, (len(x) - 1) // 4))
+        n_harm = min(self.k_max, max_harmonics(len(x)))
         self.ks = tuple(range(1, n_harm + 1))
         phi = design_matrix(x, self.omega, self.ks, self.x_center)
         coef, *_ = np.linalg.lstsq(phi, y, rcond=None)

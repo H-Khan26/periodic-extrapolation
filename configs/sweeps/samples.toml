@@ -1,6 +1,6 @@
 name = "samples"
 base = "configs/base.toml"
-jobs = 4
+jobs = 8
 overrides = ["model.baselines=['oracle']"]
 
 [grid]

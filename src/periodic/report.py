@@ -169,10 +169,11 @@ def format_table(summary: list[dict[str, Any]]) -> str:
 
 def report(sweep_dir: Path, verbose: bool = True) -> list[dict[str, Any]]:
     rows = read_results(Path(sweep_dir) / "results.csv")
+    ok = [r for r in rows if not _is_error(r)]  # error rows have no settings to group by
     group: tuple[str, ...] = ("target",)
-    if len({r.get("noise_rel") for r in rows}) > 1:
+    if len({r.get("noise_rel") for r in ok}) > 1:
         group = ("target", "noise_rel")
-    elif len({r.get("n_samples") for r in rows}) > 1:
+    elif len({r.get("n_samples") for r in ok}) > 1:
         group = ("target", "n_samples")
     summary = summarize(rows, group)
     write_summary(summary, Path(sweep_dir))

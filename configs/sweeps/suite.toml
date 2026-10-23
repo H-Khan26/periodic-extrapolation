@@ -1,6 +1,6 @@
 name = "suite"
 base = "configs/base.toml"
-jobs = 4
+jobs = 8
 overrides = [
   "model.baselines=['constant','relu_mlp','snake','rff','gp_periodic','oracle']",
 ]

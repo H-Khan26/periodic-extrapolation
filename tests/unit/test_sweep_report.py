@@ -6,8 +6,15 @@ from pathlib import Path
 import pytest
 
 from periodic.config import ConfigError
-from periodic.report import format_table, read_results, summarize
-from periodic.sweep import SweepSpec, expand, flatten_row, load_sweep, write_csv
+from periodic.report import format_table, read_results, report, summarize
+from periodic.sweep import (
+    SweepSpec,
+    expand,
+    flatten_row,
+    load_sweep,
+    settings_from_overrides,
+    write_csv,
+)
 
 
 def test_load_sweep_and_expand(tmp_path: Path) -> None:
@@ -120,6 +127,11 @@ def test_flatten_row_csv_round_trip_and_summary(tmp_path: Path) -> None:
     table = format_table(summary)
     assert "sin" in table and "wrong lock" in table and ">1e6" in table
 
+    # the error row has no noise_rel; it must not make the report group by noise level
+    grouped = report(tmp_path, verbose=False)
+    assert len(grouped) == 1 and grouped[0]["target"] == "sin"
+    assert (tmp_path / "summary_by_target.csv").exists()
+
 
 def test_flatten_row_without_evaluation_has_core_columns() -> None:
     row = flatten_row(_metrics(), None, "sin", "r")
@@ -129,3 +141,21 @@ def test_flatten_row_without_evaluation_has_core_columns() -> None:
 def test_spec_defaults() -> None:
     spec = SweepSpec(name="x")
     assert expand(spec) == [[]]
+
+
+def test_settings_from_overrides_keep_grid_values() -> None:
+    s = settings_from_overrides(['data.target="sin"', "data.noise_rel=0.1", "seed=3", "x=abc"])
+    assert s == {"target": "sin", "noise_rel": 0.1, "seed": 3, "x": "abc"}
+
+
+def test_error_rows_are_grouped_under_their_own_setting() -> None:
+    rows = []
+    for noise in (0.1, 0.3):
+        for seed in (0, 1):
+            ev = _evaluation() | {"noise_rel": noise}
+            rows.append(flatten_row(_metrics() | {"seed": seed}, ev, "sin", "r"))
+    rows.append({"target": "sin", "noise_rel": 0.1, "seed": 2, "error": "RuntimeError: boom"})
+    summary = summarize(rows, ("target", "noise_rel"))
+    assert [(s["target"], s["noise_rel"]) for s in summary] == [("sin", 0.1), ("sin", 0.3)]
+    assert summary[0]["n_runs"] == 3 and summary[0]["n_errors"] == 1
+    assert summary[1]["n_runs"] == 2 and summary[1]["n_errors"] == 0

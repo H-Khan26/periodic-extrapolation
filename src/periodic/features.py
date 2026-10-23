@@ -35,3 +35,11 @@ def design_matrix(
 def nyquist_omega(n: int, width: float) -> float:
     """Angular Nyquist frequency for n samples with mean spacing width / n."""
     return np.pi * n / width
+
+
+def max_harmonics(n: int) -> int:
+    """Largest harmonic bank that keeps a 2K + 1 coefficient fit overdetermined on n samples.
+
+    Four samples per harmonic leaves a margin for the frequency parameter and the mean.
+    """
+    return max(1, (n - 1) // 4)

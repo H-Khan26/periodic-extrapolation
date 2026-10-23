@@ -10,6 +10,7 @@ from periodic.spectral import (
     harmonic_energies,
     local_maxima,
     omega_stderr,
+    periodogram,
     profile_fit,
     promote_fundamental,
     refine_omega,
@@ -116,6 +117,24 @@ def test_stderr_matches_the_cramer_rao_bound_for_a_sine() -> None:
     se = omega_stderr(x, y, 1.0, [1], 0.0)
     crb = sigma * np.sqrt(24.0) / (np.sqrt(n) * WIDTH)
     assert se == pytest.approx(crb, rel=0.25)
+
+
+def test_periodogram_chunking_does_not_change_values() -> None:
+    x, y = make("harmonics3", n=512)
+    grid = np.linspace(0.05, 60.0, 5000)
+    full = periodogram(x, y - y.mean(), grid, max_elements=1 << 30)
+    chunked = periodogram(x, y - y.mean(), grid, max_elements=4096)  # eight frequencies per call
+    np.testing.assert_allclose(chunked, full, rtol=1e-12, atol=1e-15)
+    assert full.shape == grid.shape
+
+
+@pytest.mark.parametrize("n", [64, 128])
+def test_small_sample_counts_keep_every_fit_overdetermined(n: int) -> None:
+    x, y = make("sin", n=n)
+    est = estimate_omega(x, y, FAST, 0.0, width=WIDTH)
+    assert abs(est.omega - 1.0) < 1e-8
+    assert np.isfinite(est.stderr)
+    assert max(est.harmonics) <= (n - 1) // 4
 
 
 def test_too_few_samples_raise() -> None:

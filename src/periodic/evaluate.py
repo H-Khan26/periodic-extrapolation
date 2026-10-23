@@ -16,7 +16,7 @@ import numpy as np
 from periodic import inference
 from periodic.config import Config, config_from_dict
 from periodic.data import make_dataset
-from periodic.features import TWO_PI
+from periodic.features import TWO_PI, max_harmonics
 from periodic.metrics import (
     bands_to_records,
     dense_window,
@@ -171,7 +171,7 @@ def evaluate_run(run_dir: Path, seed: int = 1234, verbose: bool = True) -> dict[
             ks,
             float(omega_json["omega_min"]),
             float(omega_json["omega_max"]),
-            cfg.spectral.k_scan,
+            min(cfg.spectral.k_scan, max_harmonics(ds.n)),  # the bank the estimator used
         )
     )
     arrays["scan_candidates"] = np.array([c["omega"] for c in omega_json["candidates"]])

@@ -89,6 +89,22 @@ def _run_name(overrides: list[str]) -> str:
     return "_".join(parts).replace("/", "-").replace(" ", "")[:120]
 
 
+def settings_from_overrides(overrides: list[str]) -> dict[str, Any]:
+    """Grid values keyed by their last dotted segment (data.noise_rel -> noise_rel).
+
+    Error rows carry these so the report can still group them under their setting.
+    """
+    out: dict[str, Any] = {}
+    for item in overrides:
+        key, _, raw = item.partition("=")
+        name = key.strip().split(".")[-1]
+        try:
+            out[name] = tomllib.loads(f"v = {raw.strip()}")["v"]
+        except tomllib.TOMLDecodeError:
+            out[name] = raw.strip()
+    return out
+
+
 def run_one(job: tuple[str | None, list[str], str, bool]) -> dict[str, Any]:
     """Train and evaluate one configuration; safe to call in a worker process.
 
@@ -98,6 +114,9 @@ def run_one(job: tuple[str | None, list[str], str, bool]) -> dict[str, Any]:
     base, overrides, out_dir, do_eval = job
     t0 = time.perf_counter()
     row: dict[str, Any] = {"overrides": " ".join(overrides), "error": ""}
+    row.update(
+        {k: v for k, v in settings_from_overrides(overrides).items() if not isinstance(v, list)}
+    )
     try:
         posix_out = out_dir.replace("\\", "/")
         cfg = load_config(base, [*overrides, f"out_dir='{posix_out}'"])

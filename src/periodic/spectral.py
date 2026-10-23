@@ -28,7 +28,7 @@ from scipy.optimize import minimize_scalar
 from scipy.signal import lombscargle
 
 from periodic.config import SpectralConfig
-from periodic.features import TWO_PI, design_matrix, nyquist_omega
+from periodic.features import TWO_PI, design_matrix, max_harmonics, nyquist_omega
 
 EPS = np.finfo(np.float64).eps
 
@@ -169,6 +169,26 @@ def refine_omega(
 # -- scan and candidates ---------------------------------------------------------------------
 
 
+def periodogram(
+    x: np.ndarray, y: np.ndarray, grid: np.ndarray, max_elements: int = 1 << 21
+) -> np.ndarray:
+    """Normalised Lomb-Scargle power on `grid`, evaluated in frequency chunks.
+
+    scipy evaluates every frequency at once and holds about seven (n_samples x n_frequencies)
+    intermediates, which is tens of GB for 16k samples on a 65k-point grid. Each chunk is
+    max_elements floats, so the peak workspace is about 7 x 8 x max_elements bytes (120 MB by
+    default). The result equals a single call to within floating-point rounding.
+    """
+    x = np.ascontiguousarray(x, dtype=np.float64)
+    y = np.ascontiguousarray(y, dtype=np.float64)
+    grid = np.ascontiguousarray(grid, dtype=np.float64)
+    chunk = max(1, max_elements // max(len(x), 1))
+    out = np.empty(len(grid), dtype=np.float64)
+    for i in range(0, len(grid), chunk):
+        out[i : i + chunk] = lombscargle(x, y, grid[i : i + chunk], normalize=True)
+    return out
+
+
 def harmonic_sum_scan(
     x: np.ndarray,
     y: np.ndarray,
@@ -184,7 +204,7 @@ def harmonic_sum_scan(
     """
     step = resolution / oversample
     grid = np.arange(0.5 * omega_min, omega_max * 1.01 + step, step)
-    power = lombscargle(x, y - np.mean(y), grid, normalize=True)
+    power = periodogram(x, y - np.mean(y), grid)
     omegas = grid[(grid >= omega_min) & (grid <= omega_max)]
     score = np.zeros_like(omegas)
     for k in range(1, k_scan + 1):
@@ -316,9 +336,14 @@ def estimate_omega(
     if omega_max <= omega_min:
         raise ValueError(f"omega_max {omega_max:.4g} must exceed omega_min {omega_min:.4g}")
 
-    ks = list(range(1, cfg.k_scan + 1))
+    # Every least-squares fit must stay overdetermined at small n.
+    k_cap = max_harmonics(n)
+    k_scan = min(cfg.k_scan, k_cap)
+    k_omega_max = min(cfg.k_omega_max, k_cap)
+
+    ks = list(range(1, k_scan + 1))
     _, _, omegas, score = harmonic_sum_scan(
-        x, y, omega_min, omega_max, resolution, cfg.oversample, cfg.k_scan
+        x, y, omega_min, omega_max, resolution, cfg.oversample, k_scan
     )
     peaks = local_maxima(score)
     if len(peaks) == 0:
@@ -333,11 +358,11 @@ def estimate_omega(
 
     best_mse = min(c.mse for c in candidates)
     var_y = float(np.var(y))
-    tol = max(cfg.tie_margin * (2 * cfg.k_scan + 1) / n * best_mse, 1e-10 * var_y)
+    tol = max(cfg.tie_margin * (2 * k_scan + 1) / n * best_mse, 1e-10 * var_y)
     omega = max(c.omega for c in candidates if c.mse <= best_mse + tol)
 
-    omega, promoted = promote_fundamental(x, y, omega, cfg.k_scan, x_center, cfg.sig_margin)
-    sig, _ = significant_harmonics(x, y, omega, cfg.k_omega_max, x_center, cfg.sig_margin)
+    omega, promoted = promote_fundamental(x, y, omega, k_scan, x_center, cfg.sig_margin)
+    sig, _ = significant_harmonics(x, y, omega, k_omega_max, x_center, cfg.sig_margin)
     omega, mse = refine_omega(x, y, omega, sig, x_center, 0.25 * resolution, omega_min)
     stderr = omega_stderr(x, y, omega, sig, x_center)
     return OmegaEstimate(
