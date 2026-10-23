@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "name": "heldout",
+    "base": "configs/base.toml",
+    "jobs": 8,
+    "evaluate": true,
+    "overrides": [
+      "model.baselines=['oracle']"
+    ],
+    "grid": {
+      "data.target": [
+        "heldout-101",
+        "heldout-102",
+        "heldout-103",
+        "heldout-104",
+        "heldout-105",
+        "heldout-106",
+        "heldout-107",
+        "heldout-108",
+        "heldout-109",
+        "heldout-110"
+      ],
+      "seed": [
+        0
+      ]
+    }
+  },
+  "n_runs": 10,
+  "n_errors": 0,
+  "seconds": 117.16832699999213
+}

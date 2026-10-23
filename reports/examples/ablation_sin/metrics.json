@@ -1,0 +1,25 @@
+{
+  "target": "sin",
+  "seed": 0,
+  "n_samples": 4096,
+  "sigma": 0.0,
+  "head": "linear",
+  "selection": "edge-block validation",
+  "train_mse": 6.310559340542243e-31,
+  "omega": 1.0,
+  "omega_stderr": 9.280354571071146e-19,
+  "period": 6.283185307179586,
+  "harmonics": [
+    1
+  ],
+  "n_cycles": 10.0,
+  "low_confidence": false,
+  "phase_horizon_0.1rad": 1.0775450359593094e+17,
+  "fit_seconds": 0.0013508999982150272,
+  "total_seconds": 161.9718173000001,
+  "baselines": {
+    "harmonic_random_init": 0.49858165316446834,
+    "harmonic_offset_init": 0.4892544737752613,
+    "oracle": 2.478587467313782e-30
+  }
+}

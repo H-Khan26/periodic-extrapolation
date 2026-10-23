@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "name": "suite",
+    "base": "configs/base.toml",
+    "jobs": 8,
+    "evaluate": true,
+    "overrides": [
+      "model.baselines=['constant','relu_mlp','snake','rff','gp_periodic','oracle']"
+    ],
+    "grid": {
+      "data.target": [
+        "sin",
+        "harmonics3",
+        "missing_fundamental",
+        "bessel",
+        "bumps",
+        "triangle",
+        "abs_sin",
+        "square",
+        "sawtooth",
+        "pwm20",
+        "sin30",
+        "sin_eighth",
+        "one_cycle",
+        "random_fourier",
+        "scaled",
+        "quasi"
+      ],
+      "seed": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "n_runs": 80,
+  "n_errors": 0,
+  "seconds": 5531.483108999993
+}

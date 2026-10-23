@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "name": "samples",
+    "base": "configs/base.toml",
+    "jobs": 8,
+    "evaluate": true,
+    "overrides": [
+      "model.baselines=['oracle']"
+    ],
+    "grid": {
+      "data.target": [
+        "sin",
+        "square"
+      ],
+      "data.n_samples": [
+        64,
+        256,
+        1024,
+        4096,
+        16384
+      ],
+      "seed": [
+        0,
+        1,
+        2
+      ]
+    }
+  },
+  "n_runs": 30,
+  "n_errors": 0,
+  "seconds": 776.2053693999915
+}

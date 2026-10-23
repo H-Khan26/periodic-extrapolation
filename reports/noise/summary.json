@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "name": "noise",
+    "base": "configs/base.toml",
+    "jobs": 8,
+    "evaluate": true,
+    "overrides": [
+      "model.baselines=['oracle']"
+    ],
+    "grid": {
+      "data.target": [
+        "sin",
+        "harmonics3",
+        "square"
+      ],
+      "data.noise_rel": [
+        0.0,
+        0.01,
+        0.03,
+        0.1,
+        0.3
+      ],
+      "seed": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "n_runs": 75,
+  "n_errors": 0,
+  "seconds": 1013.484039700008
+}

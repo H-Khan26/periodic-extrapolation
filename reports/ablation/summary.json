@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "name": "ablation",
+    "base": "configs/base.toml",
+    "jobs": 8,
+    "evaluate": true,
+    "overrides": [
+      "model.baselines=['harmonic_random_init','harmonic_offset_init','oracle']"
+    ],
+    "grid": {
+      "data.target": [
+        "sin",
+        "harmonics3",
+        "square",
+        "sin30"
+      ],
+      "seed": [
+        0,
+        1,
+        2
+      ]
+    }
+  },
+  "n_runs": 12,
+  "n_errors": 0,
+  "seconds": 271.1801631000126
+}

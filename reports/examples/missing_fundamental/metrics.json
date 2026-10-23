@@ -1,0 +1,29 @@
+{
+  "target": "missing_fundamental",
+  "seed": 0,
+  "n_samples": 4096,
+  "sigma": 0.0,
+  "head": "linear",
+  "selection": "edge-block validation",
+  "train_mse": 1.1542513651431715e-29,
+  "omega": 1.0,
+  "omega_stderr": 9.161203864173248e-19,
+  "period": 6.283185307179586,
+  "harmonics": [
+    2,
+    3
+  ],
+  "n_cycles": 10.0,
+  "low_confidence": false,
+  "phase_horizon_0.1rad": 1.0915595972170246e+17,
+  "fit_seconds": 0.0014470999885816127,
+  "total_seconds": 547.4354984000092,
+  "baselines": {
+    "constant": 1.000101210227096,
+    "relu_mlp": 0.8116670631789877,
+    "snake": 0.3557533341616339,
+    "rff": 1.5449563015705438e-11,
+    "gp_periodic": 3.6696077260141646e-16,
+    "oracle": 1.5411518467168233e-29
+  }
+}
