@@ -20,7 +20,16 @@ import torch
 
 from periodic.config import SpectralConfig
 from periodic.features import TWO_PI, harmonic_design, phase
-from periodic.models.base import MODELS, FitResult, Regressor, mse
+from periodic.models.base import (
+    MODELS,
+    FitResult,
+    NotFittedError,
+    Regressor,
+    mse,
+    standardize,
+    thin,
+    window_center,
+)
 from periodic.spectral import OmegaEstimate, estimate_omega, profile_fit
 
 if TYPE_CHECKING:
@@ -122,11 +131,8 @@ class HarmonicRegressor(Regressor):
         t0 = time.perf_counter()
         x = np.asarray(x, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64)
-        self.x_center = 0.5 * float(np.min(x) + np.max(x))
-        self.y_mean = float(np.mean(y))
-        scale = float(np.std(y))
-        self.y_scale = scale if scale > 0 else 1.0
-        z = (y - self.y_mean) / self.y_scale
+        self.x_center = window_center(x)
+        self.y_mean, self.y_scale, z = standardize(y)
 
         est = omega_estimate or estimate_omega(x, z, self.spectral, self.x_center, width)
         self.estimate = est
@@ -216,7 +222,7 @@ class HarmonicRegressor(Regressor):
         self.mlp = model
         return {
             "adam_final_mse": adam_mse,
-            "adam_history": history[:: max(len(history) // 50, 1)],
+            "adam_history": thin(history),
             "lbfgs": polish,
         }
 
@@ -224,7 +230,7 @@ class HarmonicRegressor(Regressor):
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         if self.omega is None:
-            raise RuntimeError("model is not fitted")
+            raise NotFittedError
         theta = phase(np.asarray(x, dtype=np.float64).ravel(), self.omega, self.x_center)
         if self.head == "linear":
             assert self.coef is not None
@@ -244,7 +250,7 @@ class HarmonicRegressor(Regressor):
 
     def state(self) -> dict[str, Any]:
         if self.omega is None:
-            raise RuntimeError("model is not fitted")
+            raise NotFittedError
         st: dict[str, Any] = {
             "head": self.head,
             "omega": self.omega,

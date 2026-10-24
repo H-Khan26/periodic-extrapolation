@@ -10,7 +10,6 @@ from periodic.metrics import (
     band_pairs,
     dense_window,
     evaluate_bands,
-    fourier_coefficients,
     horizon,
     horizon_band,
     omega_agreement,
@@ -18,7 +17,6 @@ from periodic.metrics import (
     predicted_horizon,
     reference_scale,
     shape_gain,
-    spectrum_comparison,
 )
 
 TWO_PI = 2 * np.pi
@@ -90,19 +88,3 @@ def test_omega_agreement_snaps_to_small_rationals() -> None:
     assert a["rel_err"] == pytest.approx(1.0 + 2e-6, rel=1e-3)
     b = omega_agreement(1.0 / 3.0, 1.0)
     assert b["nearest_ratio"] == pytest.approx(1 / 3)
-
-
-def test_fourier_coefficients_and_spectrum_comparison() -> None:
-    f = lambda x: np.sin(x) + 0.5 * np.cos(3 * x)  # noqa: E731
-    c = fourier_coefficients(f, TWO_PI, 4)
-    np.testing.assert_allclose(2 * np.abs(c), [1.0, 0.0, 0.5, 0.0], atol=1e-12)
-    cmp = spectrum_comparison(f, f, TWO_PI, TWO_PI, k_max=4)
-    assert cmp["k"] == [1, 2, 3, 4]
-    np.testing.assert_allclose(cmp["amp_abs_err"], 0.0, atol=1e-12)
-
-
-def test_square_wave_spectrum_has_no_even_harmonics() -> None:
-    square = lambda x: np.where(np.sin(x) >= 0.0, 1.0, -1.0)  # noqa: E731
-    amp = 2 * np.abs(fourier_coefficients(square, TWO_PI, 8))
-    np.testing.assert_allclose(amp[1::2], 0.0, atol=1e-12)
-    np.testing.assert_allclose(amp[0::2], 4 / (np.pi * np.array([1, 3, 5, 7])), rtol=2e-3)

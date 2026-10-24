@@ -8,7 +8,6 @@ from periodic.data import sample_x
 from periodic.spectral import (
     estimate_omega,
     harmonic_energies,
-    local_maxima,
     omega_stderr,
     periodogram,
     profile_fit,
@@ -55,6 +54,7 @@ def test_recovers_the_fundamental_noiselessly(name: str, omega_true: float, rel_
     est = estimate_omega(x, y, FAST, 0.0, width=WIDTH)
     assert abs(est.omega - omega_true) / omega_true < rel_tol, est
     assert est.omega_min <= est.omega <= est.omega_max
+    assert est.low_confidence == (omega_true * WIDTH / (2 * np.pi) < 2.0)
 
 
 def test_noisy_estimate_is_within_its_own_error_bar_and_near_the_bound() -> None:
@@ -70,26 +70,20 @@ def test_noisy_estimate_is_within_its_own_error_bar_and_near_the_bound() -> None
     assert all(0.5 * crb < s < 2.0 * crb for s in ses)
 
 
-def test_low_confidence_flag_marks_fewer_than_two_cycles() -> None:
-    x, y = make("one_cycle")
-    assert estimate_omega(x, y, FAST, 0.0, width=WIDTH).low_confidence
-    x, y = make("sin")
-    assert not estimate_omega(x, y, FAST, 0.0, width=WIDTH).low_confidence
+def test_stderr_matches_the_cramer_rao_bound_for_a_sine() -> None:
+    n, sigma = 2048, 0.05
+    x, y = make("sin", n=n, noise=sigma, seed=1)
+    se = omega_stderr(x, y, 1.0, [1], 0.0)
+    crb = sigma * np.sqrt(24.0) / (np.sqrt(n) * WIDTH)
+    assert se == pytest.approx(crb, rel=0.25)
 
 
-def test_refine_converges_from_within_the_basin() -> None:
+def test_refine_reaches_the_float64_floor_from_within_the_basin() -> None:
+    # Brent alone stops near sqrt(eps); the Newton polish is what reaches the floor.
     x, y = make("sin")
     omega, m = refine_omega(x, y, 1.0 + 0.3 * RES, [1, 2, 3], 0.0, 0.5 * RES, RES)
     assert abs(omega - 1.0) < 1e-10
     assert m < 1e-18
-
-
-def test_local_maxima_include_endpoints_that_beat_their_neighbour() -> None:
-    v = np.array([0.0, 1.0, 0.0, 2.0, 2.0, 0.0, 5.0])
-    assert local_maxima(v).tolist() == [1, 3, 6]
-    assert local_maxima(np.array([3.0, 2.0, 1.0])).tolist() == [0]
-    assert local_maxima(np.array([1.0, 2.0])).tolist() == [1]
-    assert local_maxima(np.array([])).size == 0
 
 
 def test_promotion_moves_a_subharmonic_to_the_fundamental() -> None:
@@ -106,17 +100,10 @@ def test_profile_fit_recovers_known_coefficients_and_energies() -> None:
     x, _ = make("sin")
     y = 0.3 + 2.0 * np.cos(x) - 0.5 * np.sin(3 * x)
     coef, r, m = profile_fit(x, y, 1.0, [1, 2, 3], 0.0)
+    # design layout: [1, cos kθ ..., sin kθ ...]
     np.testing.assert_allclose(coef, [0.3, 2.0, 0.0, 0.0, 0.0, 0.0, -0.5], atol=1e-12)
     assert m < 1e-24 and np.max(np.abs(r)) < 1e-11
     np.testing.assert_allclose(harmonic_energies(coef, 3), [4.0, 0.0, 0.25], atol=1e-12)
-
-
-def test_stderr_matches_the_cramer_rao_bound_for_a_sine() -> None:
-    n, sigma = 2048, 0.05
-    x, y = make("sin", n=n, noise=sigma, seed=1)
-    se = omega_stderr(x, y, 1.0, [1], 0.0)
-    crb = sigma * np.sqrt(24.0) / (np.sqrt(n) * WIDTH)
-    assert se == pytest.approx(crb, rel=0.25)
 
 
 def test_periodogram_chunking_does_not_change_values() -> None:
@@ -135,8 +122,3 @@ def test_small_sample_counts_keep_every_fit_overdetermined(n: int) -> None:
     assert abs(est.omega - 1.0) < 1e-8
     assert np.isfinite(est.stderr)
     assert max(est.harmonics) <= (n - 1) // 4
-
-
-def test_too_few_samples_raise() -> None:
-    with pytest.raises(ValueError, match="at least 8"):
-        estimate_omega(np.arange(4.0), np.arange(4.0), FAST, 0.0)

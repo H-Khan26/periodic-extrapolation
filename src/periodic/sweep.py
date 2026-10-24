@@ -17,7 +17,6 @@ results.csv is rewritten after every finished run, so a crash loses nothing that
 
 from __future__ import annotations
 
-import csv
 import itertools
 import json
 import math
@@ -27,13 +26,13 @@ import tomllib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 
-from periodic.config import ConfigError, load_config
+from periodic.config import ConfigError, load_config, parse_override
 from periodic.evaluate import evaluate_run
-from periodic.runs import read_json, write_json
+from periodic.runs import read_json, write_csv, write_json
 from periodic.train import train
 
 
@@ -96,35 +95,38 @@ def settings_from_overrides(overrides: list[str]) -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     for item in overrides:
-        key, _, raw = item.partition("=")
-        name = key.strip().split(".")[-1]
-        try:
-            out[name] = tomllib.loads(f"v = {raw.strip()}")["v"]
-        except tomllib.TOMLDecodeError:
-            out[name] = raw.strip()
+        keys, value = parse_override(item)
+        out[keys[-1]] = value
     return out
 
 
-def run_one(job: tuple[str | None, list[str], str, bool]) -> dict[str, Any]:
+class Job(NamedTuple):
+    """One grid point; a plain tuple so it pickles cheaply into worker processes."""
+
+    base: str | None
+    overrides: list[str]
+    out_dir: str
+    evaluate: bool
+
+
+def run_one(job: Job) -> dict[str, Any]:
     """Train and evaluate one configuration; safe to call in a worker process.
 
     Never raises: a failure becomes a row whose ``error`` column holds the exception.
     """
     torch.set_num_threads(1)
-    base, overrides, out_dir, do_eval = job
     t0 = time.perf_counter()
-    row: dict[str, Any] = {"overrides": " ".join(overrides), "error": ""}
-    row.update(
-        {k: v for k, v in settings_from_overrides(overrides).items() if not isinstance(v, list)}
-    )
+    row: dict[str, Any] = {"overrides": " ".join(job.overrides), "error": ""}
     try:
-        posix_out = out_dir.replace("\\", "/")
-        cfg = load_config(base, [*overrides, f"out_dir='{posix_out}'"])
+        settings = settings_from_overrides(job.overrides)
+        row.update({k: v for k, v in settings.items() if not isinstance(v, list)})
+        posix_out = job.out_dir.replace("\\", "/")
+        cfg = load_config(job.base, [*job.overrides, f"out_dir='{posix_out}'"])
         row["target"] = cfg.data.target
         row["seed"] = cfg.seed
         run_dir = train(cfg, verbose=False)
         metrics = read_json(run_dir / "metrics.json")
-        ev = evaluate_run(run_dir, verbose=False) if do_eval else None
+        ev = evaluate_run(run_dir, verbose=False) if job.evaluate else None
         row.update(flatten_row(metrics, ev, cfg.data.target, str(run_dir)))
     except Exception as exc:
         row["error"] = f"{type(exc).__name__}: {exc}"
@@ -188,20 +190,6 @@ def flatten_row(
     return row
 
 
-def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
-    keys: list[str] = []
-    for r in rows:
-        for k in r:
-            if k not in keys:
-                keys.append(k)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=keys)
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
-
-
 def _limit_blas_threads(jobs: int) -> None:
     """Share the cores between worker processes instead of letting each BLAS take them all."""
     per = max(1, (os.cpu_count() or jobs) // jobs)
@@ -225,7 +213,7 @@ def run_sweep(spec_path: Path, out_root: Path = Path("reports"), verbose: bool =
     (out / "runs").mkdir(parents=True, exist_ok=True)
     combos = expand(spec)
     jobs = [
-        (spec.base, [*spec.overrides, *c], str(out / "runs" / _run_name(c)), spec.evaluate)
+        Job(spec.base, [*spec.overrides, *c], str(out / "runs" / _run_name(c)), spec.evaluate)
         for c in combos
     ]
     t0 = time.perf_counter()

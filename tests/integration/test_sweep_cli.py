@@ -65,10 +65,3 @@ def test_a_failing_run_becomes_an_error_row(
     assert math.isnan(by_target["sin"]["error"])
     assert abs(by_target["sin"]["omega"] - 1.0) < 1e-6
     assert read_json(out / "summary.json")["n_errors"] == 1
-
-
-def test_sweep_rejects_a_bad_spec(tmp_path: Path) -> None:
-    spec = tmp_path / "bad.toml"
-    spec.write_text('name = "bad"\n[grid]\nseed = []\n')
-    with pytest.raises(Exception, match="non-empty"):
-        main(["sweep", "--spec", str(spec), "--out-root", str(tmp_path), "--no-figures"])

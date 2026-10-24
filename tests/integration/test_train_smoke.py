@@ -7,27 +7,32 @@ import pytest
 
 from periodic import inference, targets
 from periodic.cli import main
-from periodic.config import load_config
 from periodic.runs import read_json
 from periodic.targets import TARGETS, Target
-from periodic.train import train
 
 REPO = Path(__file__).resolve().parents[2]
+pytestmark = pytest.mark.xdist_group("train_smoke")  # one worker, so the fixture trains once
 
 
 @pytest.fixture(scope="module")
 def smoke_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    tmp = tmp_path_factory.mktemp("smoke")
-    posix = str(tmp).replace("\\", "/")
-    cfg = load_config(
-        REPO / "configs" / "smoke.toml",
+    """One run trained through the CLI with both heads, written to an explicit --run-dir."""
+    posix = str(tmp_path_factory.mktemp("smoke")).replace("\\", "/")
+    code = main(
         [
+            "train",
+            "--config",
+            str(REPO / "configs" / "smoke.toml"),
+            "--set",
             f"data.cache_dir='{posix}/cache'",
-            f"out_dir='{posix}/runs'",
+            "--set",
             'model.heads=["linear","mlp"]',
-        ],
+            "--run-dir",
+            f"{posix}/run",
+        ]
     )
-    return train(cfg, verbose=False)
+    assert code == 0
+    return Path(posix) / "run"
 
 
 def test_run_directory_is_complete(smoke_run: Path) -> None:
@@ -68,22 +73,3 @@ def test_inference_does_not_touch_the_black_box(
 
     after = inference.predict(smoke_run, xs)
     assert np.array_equal(before, after)
-
-
-def test_train_cli_with_explicit_run_dir(tmp_path: Path) -> None:
-    posix = str(tmp_path).replace("\\", "/")
-    code = main(
-        [
-            "train",
-            "--config",
-            str(REPO / "configs" / "smoke.toml"),
-            "--set",
-            f"data.cache_dir='{posix}/cache'",
-            "--set",
-            "data.n_samples=256",
-            "--run-dir",
-            f"{posix}/run",
-        ]
-    )
-    assert code == 0
-    assert (tmp_path / "run" / "metrics.json").exists()

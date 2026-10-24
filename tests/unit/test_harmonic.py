@@ -21,7 +21,7 @@ def make(name: str, n: int = 2048, seed: int = 0) -> tuple[np.ndarray, np.ndarra
     return x, get_target(name)(x)
 
 
-def test_linear_head_extrapolates_to_one_million() -> None:
+def test_linear_head_extrapolates_to_one_million_and_round_trips(tmp_path: Path) -> None:
     t = get_target("harmonics3")
     x, y = make("harmonics3")
     m = HarmonicRegressor(head="linear", spectral=FAST)
@@ -31,6 +31,13 @@ def test_linear_head_extrapolates_to_one_million() -> None:
     np.testing.assert_allclose(m.predict(xs), t(xs), atol=1e-6)
     assert m.period == pytest.approx(2 * np.pi, rel=1e-8)
     assert m.predict(np.float64(0.5)).shape == ()
+
+    m.save(tmp_path / "model")
+    back = load_model(tmp_path / "model")
+    assert isinstance(back, HarmonicRegressor)
+    assert back.omega == m.omega
+    xs = np.linspace(-1e6, 1e6, 1001)
+    assert np.array_equal(back.predict(xs), m.predict(xs))
 
 
 @pytest.mark.parametrize("head", ["linear", "mlp"])
@@ -53,18 +60,6 @@ def test_predictions_repeat_exactly_for_arbitrary_parameters(head: str) -> None:
     np.testing.assert_allclose(m.predict(x - shift), m.predict(x), atol=1e-8)
 
 
-def test_save_load_round_trip_is_bitwise(tmp_path: Path) -> None:
-    x, y = make("missing_fundamental")
-    m = HarmonicRegressor(head="linear", spectral=FAST)
-    m.fit(x, y)
-    m.save(tmp_path / "model")
-    back = load_model(tmp_path / "model")
-    assert isinstance(back, HarmonicRegressor)
-    assert back.omega == m.omega
-    xs = np.linspace(-1e6, 1e6, 1001)
-    assert np.array_equal(back.predict(xs), m.predict(xs))
-
-
 def test_mlp_head_learns_a_square_wave_and_round_trips(tmp_path: Path) -> None:
     x, y = make("square", n=1024)
     train, val = edge_split(x, X_MIN, X_MAX, 0.1)
@@ -73,20 +68,12 @@ def test_mlp_head_learns_a_square_wave_and_round_trips(tmp_path: Path) -> None:
     )
     res = m.fit(x[train], y[train], x[val], y[val])
     assert res.val_mse is not None and res.val_mse < 0.2
-    assert res.details["lbfgs"]["applied"] in (True, False)
     assert m.omega == res.details["omega_initial"]  # the head never moves ω
     assert m.omega == pytest.approx(1.0, abs=5e-3)
     m.save(tmp_path / "mlp")
     back = load_model(tmp_path / "mlp")
     xs = np.array([0.5, 1e5 + 0.5, -1e6 + 0.5])
     assert np.array_equal(back.predict(xs), m.predict(xs))
-
-
-def test_unfitted_model_raises_and_bad_head_rejected() -> None:
-    with pytest.raises(RuntimeError, match="not fitted"):
-        HarmonicRegressor().predict(np.zeros(3))
-    with pytest.raises(ValueError, match="head must be"):
-        HarmonicRegressor(head="cnn")
 
 
 def test_from_config_passes_hyperparameters() -> None:

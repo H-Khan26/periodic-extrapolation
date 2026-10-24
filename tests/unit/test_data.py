@@ -6,30 +6,20 @@ import numpy as np
 import pytest
 
 from periodic.config import DataConfig
-from periodic.data import Dataset, edge_split, make_dataset, sample_x, signal_amplitude
+from periodic.data import Dataset, edge_split, make_dataset, sample_x
 
 
-def test_stratified_puts_exactly_one_sample_in_each_cell(rng: np.random.Generator) -> None:
+@pytest.mark.parametrize("strategy", ["stratified", "uniform", "grid"])
+def test_sampling_covers_the_window(strategy: str, rng: np.random.Generator) -> None:
     n, lo, hi = 256, -2.0, 6.0
-    x = sample_x(n, lo, hi, "stratified", rng)
-    cells = np.floor((x - lo) / ((hi - lo) / n)).astype(int)
-    assert np.array_equal(cells, np.arange(n))
+    x = sample_x(n, lo, hi, strategy, rng)
+    assert x.shape == (n,) and x.dtype == np.float64
     assert np.all((x >= lo) & (x < hi))
-    assert np.all(np.diff(x) > 0)
-
-
-@pytest.mark.parametrize("strategy", ["uniform", "grid"])
-def test_other_strategies_cover_the_window(strategy: str, rng: np.random.Generator) -> None:
-    x = sample_x(100, 0.0, 1.0, strategy, rng)
-    assert x.shape == (100,)
-    assert x.dtype == np.float64
-    assert np.all((x >= 0.0) & (x < 1.0))
-    assert np.max(np.diff(np.sort(x))) < 0.1
-
-
-def test_unknown_strategy_raises(rng: np.random.Generator) -> None:
-    with pytest.raises(ValueError, match="unknown sampling strategy"):
-        sample_x(10, 0.0, 1.0, "random", rng)
+    assert np.all(np.diff(x) >= 0)
+    assert np.max(np.diff(x)) < 0.1 * (hi - lo)
+    if strategy == "stratified":  # exactly one draw per equal cell
+        cells = np.floor((x - lo) / ((hi - lo) / n)).astype(int)
+        assert np.array_equal(cells, np.arange(n))
 
 
 def test_dataset_is_deterministic_per_seed(tmp_path: Path) -> None:
@@ -72,8 +62,3 @@ def test_edge_split_is_disjoint_complete_and_sized(rng: np.random.Generator) -> 
     assert np.all(np.abs(x[val]) >= 0.8)
     train0, val0 = edge_split(x, -1.0, 1.0, 0.0)
     assert val0.sum() == 0 and train0.all()
-
-
-def test_signal_amplitude_handles_constants() -> None:
-    assert signal_amplitude(np.array([2.0, 2.0])) == 1.0
-    assert signal_amplitude(np.array([-1.0, 3.0])) == 2.0

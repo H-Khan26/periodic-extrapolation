@@ -1,7 +1,7 @@
 """Evaluate a saved run against the black-box target far outside the training window.
 
 Writes ``evaluation.json`` (scalars, bands, horizons, baselines) and ``evaluation.npz`` (arrays
-for figures: dense windows, the ω loss landscape, in-window residuals) into the run directory.
+for figures: dense windows and the ω loss landscape) into the run directory.
 Evaluation may call the target; inference never does.
 """
 
@@ -29,7 +29,6 @@ from periodic.metrics import (
     reference_scale,
     rmse,
     shape_gain,
-    spectrum_comparison,
 )
 from periodic.models import Regressor
 from periodic.runs import read_json, write_json
@@ -114,14 +113,10 @@ def _omega_landscape(
     grid = grid[grid > 0]
     z = (y - np.mean(y)) / (np.std(y) or 1.0)
     mse = np.array([profile_mse(x, z, w, ks, x_center) for w in grid])
-    scan_grid, power, omegas, score = harmonic_sum_scan(
-        x, z, omega_min, omega_max, res, oversample=4, k_scan=k_scan
-    )
+    omegas, score = harmonic_sum_scan(x, z, omega_min, omega_max, res, oversample=4, k_scan=k_scan)
     return {
         "landscape_omega": grid,
         "landscape_mse": mse,
-        "scan_grid": scan_grid,
-        "scan_power": power,
         "scan_omega": omegas,
         "scan_score": score,
     }
@@ -154,10 +149,8 @@ def evaluate_run(run_dir: Path, seed: int = 1234, verbose: bool = True) -> dict[
         "n_cycles": metrics["n_cycles"],
         "low_confidence": metrics["low_confidence"],
     }
-    spectrum = None
     if target.period is not None:
         omega_info.update(omega_agreement(omega_hat, TWO_PI / target.period))
-        spectrum = spectrum_comparison(model.predict, target, learned_period, target.period)
 
     ks = [int(k) for k in metrics["harmonics"]][:16] or [1]
     omega_json = read_json(run_dir / "omega.json")["full"]
@@ -175,9 +168,6 @@ def evaluate_run(run_dir: Path, seed: int = 1234, verbose: bool = True) -> dict[
         )
     )
     arrays["scan_candidates"] = np.array([c["omega"] for c in omega_json["candidates"]])
-    arrays["train_x"] = ds.x
-    arrays["train_y"] = ds.y
-    arrays["train_pred"] = model.predict(ds.x)
 
     # Only the baselines this run's config asked for are scored, so a reused run directory
     # cannot leak stale baselines into the report; a skipped oracle simply has no directory.
@@ -208,7 +198,6 @@ def evaluate_run(run_dir: Path, seed: int = 1234, verbose: bool = True) -> dict[
         },
         "phase_horizon_0.1rad": metrics["phase_horizon_0.1rad"],
         "dense": dense_rows,
-        "spectrum": spectrum,
         "baselines": baselines,
     }
     write_json(run_dir / "evaluation.json", result)

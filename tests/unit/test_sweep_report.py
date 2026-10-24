@@ -7,14 +7,8 @@ import pytest
 
 from periodic.config import ConfigError
 from periodic.report import format_table, read_results, report, summarize
-from periodic.sweep import (
-    SweepSpec,
-    expand,
-    flatten_row,
-    load_sweep,
-    settings_from_overrides,
-    write_csv,
-)
+from periodic.runs import write_csv
+from periodic.sweep import expand, flatten_row, load_sweep, settings_from_overrides
 
 
 def test_load_sweep_and_expand(tmp_path: Path) -> None:
@@ -136,11 +130,6 @@ def test_flatten_row_csv_round_trip_and_summary(tmp_path: Path) -> None:
 def test_flatten_row_without_evaluation_has_core_columns() -> None:
     row = flatten_row(_metrics(), None, "sin", "r")
     assert row["target"] == "sin" and "horizon_0.1" not in row
-
-
-def test_spec_defaults() -> None:
-    spec = SweepSpec(name="x")
-    assert expand(spec) == [[]]
 
 
 def test_settings_from_overrides_keep_grid_values() -> None:

@@ -1,12 +1,14 @@
-"""Models: the periodic-by-construction harmonic regressor and the baselines."""
+"""Models: the periodic-by-construction harmonic regressor, the baselines and the ablations."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from periodic.models import baselines as _baselines  # noqa: F401  (registers the baselines)
-from periodic.models import harmonic as _harmonic  # noqa: F401  (registers "harmonic")
-from periodic.models.base import MODELS, FitResult, Regressor, load_state, mse
+# Importing the model modules registers their classes in MODELS.
+from periodic.models import ablations as _ablations  # noqa: F401
+from periodic.models import baselines as _baselines  # noqa: F401
+from periodic.models import harmonic as _harmonic  # noqa: F401
+from periodic.models.base import MODELS, FitResult, NotFittedError, Regressor, load_state, mse
 
 
 def load_model(path: Path) -> Regressor:
@@ -14,4 +16,4 @@ def load_model(path: Path) -> Regressor:
     return MODELS.get(name).from_state(state)
 
 
-__all__ = ["MODELS", "FitResult", "Regressor", "load_model", "load_state", "mse"]
+__all__ = ["MODELS", "FitResult", "NotFittedError", "Regressor", "load_model", "load_state", "mse"]

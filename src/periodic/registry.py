@@ -1,8 +1,8 @@
-"""Minimal name -> object registry used for targets, models and estimators."""
+"""Minimal name -> object registry used for targets and models."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 
 class RegistryError(KeyError):
@@ -35,12 +35,3 @@ class Registry[T]:
 
     def names(self) -> list[str]:
         return sorted(self._items)
-
-    def __contains__(self, name: object) -> bool:
-        return name in self._items
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.names())
-
-    def __len__(self) -> int:
-        return len(self._items)

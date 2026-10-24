@@ -1,64 +1,70 @@
 """Inference and model code must never import the black-box targets, directly or indirectly.
 
-Run in a fresh interpreter so indirect imports are caught: importing any module that a model
-or the inference path may use must not pull periodic.targets or periodic.data into sys.modules.
+The runtime check imports every model-side module in one fresh interpreter, so indirect imports
+are caught. It names the top-level module, or the models package as a whole, that first pulls in
+a forbidden one: importing any models submodule runs the package __init__, which imports them
+all. The static check names the offending file, and also catches imports inside functions.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 SRC = Path(__file__).resolve().parents[2] / "src" / "periodic"
 FORBIDDEN = {"periodic.targets", "periodic.data"}
-
-# Modules that sit on the model / inference side of the boundary. Extended as modules land.
-MODEL_SIDE_MODULES = ["periodic.config", "periodic.features", "periodic.registry", "periodic.runs"]
-MODEL_SIDE_MODULES += [
-    f"periodic.models.{p.stem}"
-    for p in sorted((SRC / "models").glob("*.py"))
-    if p.stem != "__init__"
+# Top-level modules before the models package, so a violation outside models/ is blamed on the
+# module that introduces it.
+MODEL_SIDE_FILES = [
+    *(SRC / f"{name}.py" for name in ("config", "registry", "runs", "features", "spectral")),
+    *sorted((SRC / "models").glob("*.py")),
+    SRC / "inference.py",
 ]
-if (SRC / "models" / "__init__.py").exists():
-    MODEL_SIDE_MODULES.append("periodic.models")
-if (SRC / "inference.py").exists():
-    MODEL_SIDE_MODULES.append("periodic.inference")
-if (SRC / "spectral.py").exists():
-    MODEL_SIDE_MODULES.append("periodic.spectral")
+
+_PROBE = """
+import importlib, json, sys
+forbidden, seen, culprits = set(sys.argv[1].split(",")), set(), {}
+for module in sys.argv[2:]:
+    importlib.import_module(module)
+    new = (forbidden & set(sys.modules)) - seen
+    if new:
+        culprits[module] = sorted(new)
+        seen |= new
+print(json.dumps(culprits))
+"""
 
 
-@pytest.mark.parametrize("module", MODEL_SIDE_MODULES)
-def test_model_side_module_never_loads_targets(module: str) -> None:
-    code = (
-        f"import sys, importlib; importlib.import_module({module!r}); "
-        f"print(sorted(m for m in sys.modules if m in {sorted(FORBIDDEN)!r}))"
-    )
+def _module_name(path: Path) -> str:
+    parts = path.relative_to(SRC.parent).with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def test_model_side_modules_never_load_targets() -> None:
+    modules = [_module_name(p) for p in MODEL_SIDE_FILES]
     out = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120
+        [sys.executable, "-c", _PROBE, ",".join(sorted(FORBIDDEN)), *modules],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=300,
     )
-    assert out.stdout.strip() == "[]", f"{module} loaded {out.stdout.strip()}"
+    assert json.loads(out.stdout.strip().splitlines()[-1]) == {}
 
 
 def _imports_of(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             names.update(a.name for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             names.add(node.module)
+            names.update(f"{node.module}.{a.name}" for a in node.names)  # from periodic import x
     return names
 
 
-MODEL_SIDE_FILES = sorted((SRC / "models").glob("*.py")) + [
-    p for p in (SRC / "inference.py", SRC / "spectral.py", SRC / "features.py") if p.exists()
-]
-
-
-@pytest.mark.parametrize("path", MODEL_SIDE_FILES, ids=lambda p: p.name)
-def test_model_side_file_has_no_static_import_of_targets(path: Path) -> None:
-    assert not (_imports_of(path) & FORBIDDEN), f"{path.name} imports a forbidden module"
+def test_model_side_files_have_no_static_import_of_targets() -> None:
+    offenders = {p.name: sorted(_imports_of(p) & FORBIDDEN) for p in MODEL_SIDE_FILES}
+    assert {k: v for k, v in offenders.items() if v} == {}

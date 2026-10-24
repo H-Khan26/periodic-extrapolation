@@ -134,7 +134,8 @@ def _build(cls: type, data: dict[str, Any], path: str) -> Any:
     return cls(**kwargs)
 
 
-def _parse_override(item: str) -> tuple[list[str], Any]:
+def parse_override(item: str) -> tuple[list[str], Any]:
+    """Split 'a.b=value' into (['a', 'b'], value); the value is a TOML literal or a bare string."""
     if "=" not in item:
         raise ConfigError(f"override '{item}' must look like section.key=value")
     key, raw = item.split("=", 1)
@@ -164,7 +165,7 @@ def load_config(path: str | Path | None = None, overrides: list[str] | None = No
         with Path(path).open("rb") as fh:
             data = tomllib.load(fh)
     for item in overrides or []:
-        keys, value = _parse_override(item)
+        keys, value = parse_override(item)
         _set_nested(data, keys, value)
     cfg = _build(Config, data, "")
     validate(cfg)

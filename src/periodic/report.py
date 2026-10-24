@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from periodic.runs import write_json
+from periodic.runs import write_csv, write_json
 
 LOCK_TOL = 1e-3  # |omega/omega_true - 1| above this counts as an imprecise fundamental
 LOCK_NEAR = 1e-2  # within this of a wrong small rational multiple counts as a harmonic lock
@@ -118,18 +118,8 @@ def summarize(
 
 
 def write_summary(summary: list[dict[str, Any]], out_dir: Path) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
     write_json(out_dir / "summary_by_target.json", summary)
-    keys: list[str] = []
-    for r in summary:
-        for k in r:
-            if k not in keys:
-                keys.append(k)
-    with (out_dir / "summary_by_target.csv").open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=keys)
-        w.writeheader()
-        for r in summary:
-            w.writerow(r)
+    write_csv(summary, out_dir / "summary_by_target.csv")
 
 
 def _fmt(value: Any, fmt: str) -> str:

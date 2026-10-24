@@ -197,10 +197,10 @@ def harmonic_sum_scan(
     resolution: float,
     oversample: int,
     k_scan: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Single-term periodogram on a fine grid and the harmonic-sum score on [omega_min, omega_max].
+) -> tuple[np.ndarray, np.ndarray]:
+    """Harmonic-sum score of a single-term periodogram on [omega_min, omega_max].
 
-    Returns (grid, power, omegas, score). Harmonics that fall beyond the grid contribute zero.
+    Returns (omegas, score). Harmonics that fall beyond the periodogram grid contribute zero.
     """
     step = resolution / oversample
     grid = np.arange(0.5 * omega_min, omega_max * 1.01 + step, step)
@@ -209,7 +209,23 @@ def harmonic_sum_scan(
     score = np.zeros_like(omegas)
     for k in range(1, k_scan + 1):
         score += np.interp(k * omegas, grid, power, right=0.0)
-    return grid, power, omegas, score
+    return omegas, score
+
+
+def periodogram_peak(
+    x: np.ndarray, y: np.ndarray, oversample: int = 8, nyquist_factor: float = 2.0
+) -> float:
+    """ω of the single-term periodogram maximum, unrefined (used by baselines and ablations).
+
+    The scan runs from one cycle per sample span to nyquist_factor times the mean-spacing
+    Nyquist frequency: jittered samples keep a frequency above Nyquist identifiable, with only
+    weak aliases below it.
+    """
+    width = float(np.ptp(x))
+    resolution = TWO_PI / width
+    omega_max = nyquist_factor * nyquist_omega(len(x), width)
+    omegas, power = harmonic_sum_scan(x, y, resolution, omega_max, resolution, oversample, 1)
+    return float(omegas[np.argmax(power)])
 
 
 def local_maxima(values: np.ndarray) -> np.ndarray:
@@ -342,7 +358,7 @@ def estimate_omega(
     k_omega_max = min(cfg.k_omega_max, k_cap)
 
     ks = list(range(1, k_scan + 1))
-    _, _, omegas, score = harmonic_sum_scan(
+    omegas, score = harmonic_sum_scan(
         x, y, omega_min, omega_max, resolution, cfg.oversample, k_scan
     )
     peaks = local_maxima(score)

@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import font_manager
 from matplotlib.figure import Figure
-from matplotlib.ticker import MaxNLocator, NullLocator
+from matplotlib.ticker import NullLocator
 
 from periodic.report import read_results
 from periodic.runs import read_json
@@ -56,10 +56,6 @@ KNOWN_MODELS = (
     "gp_periodic",
 )
 NRMSE_FLOOR = 1e-16
-AMP_FLOOR = 1e-12
-# Fallbacks for sweeps whose results.csv predates the eval_max / window_width columns.
-DEFAULT_EVAL_MAX = 1e6
-DEFAULT_WINDOW_WIDTH = 20.0 * math.pi
 CAP_FACTOR = 3.0  # values beyond the evaluated range are drawn at CAP_FACTOR * eval_max
 PREFERRED_BAND_LO = 1e3  # the baselines figure uses the band whose lower edge is closest to this
 RANDOM_PHASE = math.sqrt(2.0)
@@ -196,11 +192,6 @@ def _positive(v: float, default: float) -> float:
     return v if math.isfinite(v) and v > 0 else default
 
 
-def _spread(n: int, half_width: float) -> np.ndarray:
-    """Deterministic offsets that fan n overlapping points across a category band."""
-    return np.linspace(-half_width, half_width, n) if n > 1 else np.zeros(n)
-
-
 def _median(v: np.ndarray) -> float:
     v = v[~np.isnan(v)]
     return float(np.median(v)) if v.size else math.nan
@@ -213,16 +204,10 @@ def _reference_lines(ax: Any) -> None:
     )
 
 
-def _category_axis(ax: Any, labels: list[str], axis: str = "x") -> None:
-    ticks = np.arange(len(labels))
-    if axis == "y":
-        ax.set_yticks(ticks, labels)
-        ax.set_ylim(len(labels) - 0.4, -0.6)
-        ax.grid(False, axis="y")
-        return
+def _category_axis(ax: Any, labels: list[str]) -> None:
     rotate = len(labels) > 4
     ax.set_xticks(
-        ticks,
+        np.arange(len(labels)),
         labels,
         rotation=40 if rotate else 0,
         ha="right" if rotate else "center",
@@ -282,15 +267,7 @@ def plot_run(run_dir: Path) -> list[Path]:
     out = run_dir / "figures"
     out.mkdir(parents=True, exist_ok=True)
     run = _Run(ev, arrays, metrics, model_styles(_dict(ev.get("baselines"))), out)
-    figures = (
-        _error_vs_distance,
-        _overlays,
-        _phase_offset,
-        _spectrum,
-        _omega_landscape,
-        _train_fit,
-    )
-    return _draw_all(figures, run)
+    return _draw_all((_error_vs_distance, _overlays, _omega_landscape), run)
 
 
 def _band_curve(bands: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -355,16 +332,14 @@ def _error_vs_distance(run: _Run) -> Path | None:
     return path
 
 
-def _dense_rows(run: _Run) -> list[dict[str, Any]]:
-    """Dense-window rows with a finite centre."""
-    rows = run.ev.get("dense") or []
-    return [r for r in rows if isinstance(r, dict) and math.isfinite(_num(r, "center"))]
-
-
 def _overlays(run: _Run) -> Path | None:
     parts = ("x", "truth", "pred")
     rows = [
-        r for r in _dense_rows(run) if all(f"dense_{r.get('tag')}_{p}" in run.arrays for p in parts)
+        r
+        for r in run.ev.get("dense") or []
+        if isinstance(r, dict)
+        and math.isfinite(_num(r, "center"))
+        and all(f"dense_{r.get('tag')}_{p}" in run.arrays for p in parts)
     ]
     if not rows:
         return None
@@ -381,10 +356,7 @@ def _overlays(run: _Run) -> Path | None:
     size = (8.5 if ncols == 2 else 5.0, 1.9 * len(grid) + 1.3)
     with _figure(
         path, title, nrows=len(grid), ncols=ncols, sharey=True, squeeze=False, figsize=size
-    ) as (
-        fig,
-        axes,
-    ):
+    ) as (fig, axes):
         for panel_row, cells in zip(axes, grid.values(), strict=True):
             for ax, cell in zip(panel_row, cells, strict=True):
                 if cell is None:
@@ -412,91 +384,6 @@ def _overlay_panel(run: _Run, ax: Any, row: dict[str, Any]) -> None:
     nrmse_txt = f"{nrmse:.2g}" if math.isfinite(nrmse) else "n/a"
     phase_txt = f"{phase:+.2g} rad" if math.isfinite(phase) else "n/a"
     ax.set_title(f"centre {_fmt(c)}   NRMSE {nrmse_txt}   phase {phase_txt}")
-
-
-def _phase_offset(run: _Run) -> Path | None:
-    rows = [
-        r
-        for r in _dense_rows(run)
-        if _num(r, "center") != 0 and math.isfinite(_num(r, "phase_offset_rad"))
-    ]
-    if not rows:
-        return None
-    centre = np.array([_num(r, "center") for r in rows])
-    phase = np.array([_num(r, "phase_offset_rad") for r in rows])
-    dist = np.abs(centre)
-    sigma = run.stderr if math.isfinite(run.stderr) else 0.0
-    xs = np.geomspace(dist.min() / 2.0, dist.max() * 2.0, 200)
-    tiny = [v for v in (sigma * dist.min(), *np.abs(phase)) if v > 0]
-    floor = max(min(tiny) / 2.0, 1e-15) if tiny else 1e-12
-    linthresh = 10.0 ** math.floor(math.log10(floor))  # a decade, so ticks sit at its edges
-    top = max(float(np.abs(phase).max()), 3.0 * sigma * dist.max(), 10.0 * linthresh)
-    top = min(1.6 * top, math.pi)
-
-    path = run.out / "phase_offset.png"
-    title = "Phase offset of the prediction against distance, inside the model's own ω error bar"
-    with _figure(path, title, figsize=(7.5, 5.0)) as (fig, ax):
-        if sigma > 0:
-            band = sigma * xs
-            ax.fill_between(
-                xs,
-                -3 * band,
-                3 * band,
-                color=run.color,
-                alpha=0.08,
-                lw=0,
-                label=r"$\pm 3\sigma_\omega|x|$",
-            )
-            ax.fill_between(
-                xs, -band, band, color=run.color, alpha=0.18, lw=0, label=r"$\pm \sigma_\omega|x|$"
-            )
-        ax.axhline(0.0, color=AXIS, lw=0.8)
-        for sign, marker, label in ((1.0, "o", "window at +x"), (-1.0, "s", "window at -x")):
-            m = np.sign(centre) == sign
-            if m.any():
-                ax.scatter(dist[m], phase[m], color=run.color, marker=marker, label=label, **DOT)
-        ax.set_xscale("log")
-        ax.set_yscale("symlog", linthresh=linthresh)
-        ax.set(xlim=(xs[0], xs[-1]), ylim=(-top, top))
-        ax.set_xlabel("|x| (window centre)")
-        ax.set_ylabel("phase offset (rad, symmetric log; > 0: prediction lags)")
-        _legend(fig, [ax], ncol=4)
-    return path
-
-
-def _spectrum(run: _Run) -> Path | None:
-    sp = _dict(run.ev.get("spectrum"))
-    k, truth, learned = (
-        np.asarray(sp.get(key) or [], dtype=float) for key in ("k", "amp_true", "amp_pred")
-    )
-    if k.size == 0 or not k.size == truth.size == learned.size:
-        return None
-    truth, learned = np.maximum(truth, AMP_FLOOR), np.maximum(learned, AMP_FLOOR)
-
-    path = run.out / "spectrum.png"
-    title = "Harmonic amplitudes of the learned function and of the truth"
-    with _figure(path, title, figsize=(7.5, 4.6)) as (fig, ax):
-        ax.plot(
-            k, truth, ls="none", marker="o", ms=9, mfc="none", mec=INK_2, mew=1.3, label="truth"
-        )
-        ax.plot(
-            k,
-            learned,
-            ls="none",
-            marker="o",
-            ms=4.5,
-            color=run.color,
-            mec=run.color,
-            label="learned",
-        )
-        top = float(np.nanmax(np.concatenate([truth, learned])))
-        ax.set_yscale("log")
-        ax.set_ylim(AMP_FLOOR / 3.0, _positive(top, AMP_FLOOR) * 3.0)
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set_xlabel("harmonic k (multiple of the fundamental)")
-        ax.set_ylabel("amplitude 2|c_k| (floored at 1e-12)")
-        _legend(fig, [ax], ncol=2)
-    return path
 
 
 def _omega_landscape(run: _Run) -> Path | None:
@@ -581,19 +468,11 @@ def _zoom_panel(run: _Run, ax: Any, omega: np.ndarray, mse: np.ndarray) -> None:
     ax.set_ylabel("profiled MSE (standardised target)")
 
 
-def _window_width(run: _Run) -> float:
-    """Training window width L from evaluation.json, else the span of the training x."""
-    width = _num(_dict(run.ev.get("window")), "width")
-    if math.isfinite(width) and width > 0:
-        return width
-    x = run.arrays.get("train_x")
-    return float(np.ptp(x)) if x is not None and x.size > 1 else 0.0
-
-
 def _resolution_bar(run: _Run, ax: Any) -> None:
-    """Horizontal bar of width 2π/L centred on the estimated ω."""
-    omega_hat, width = _num(run.omega, "omega"), _window_width(run)
-    if not math.isfinite(omega_hat) or width <= 0:
+    """Horizontal bar of width 2π/L centred on the estimated ω (L: training window width)."""
+    omega_hat = _num(run.omega, "omega")
+    width = _num(_dict(run.ev.get("window")), "width")
+    if not (math.isfinite(omega_hat) and math.isfinite(width) and width > 0):
         return
     res = 2.0 * math.pi / width
     coords = ("data", "axes fraction")
@@ -618,30 +497,6 @@ def _resolution_bar(run: _Run, ax: Any) -> None:
     )
 
 
-def _train_fit(run: _Run) -> Path | None:
-    a = run.arrays
-    if not all(k in a for k in ("train_x", "train_y", "train_pred")):
-        return None
-    x, y, p = a["train_x"], a["train_y"], a["train_pred"]
-    order = np.argsort(x)
-
-    path = run.out / "train_fit.png"
-    title = "Fit inside the training window, with residuals"
-    with _figure(path, title, nrows=2, sharex=True, height_ratios=[2, 1], figsize=(8.0, 5.4)) as (
-        fig,
-        (top, bottom),
-    ):
-        top.scatter(x, y, s=4, color=MUTED, lw=0, label="training samples")
-        top.plot(x[order], p[order], color=run.color, lw=1.2, label="prediction")
-        top.set_ylabel("y")
-        bottom.axhline(0.0, color=AXIS, lw=0.8)
-        bottom.scatter(x, y - p, s=4, color=INK_2, lw=0, label="residual y - prediction")
-        bottom.set_xlabel("x (training window)")
-        bottom.set_ylabel("y - prediction")
-        _legend(fig, (top, bottom))
-    return path
-
-
 # --------------------------------------------------------------------------- sweep figures
 
 
@@ -655,11 +510,9 @@ class _Sweep:
         self.target_col = np.array(names)
         self.targets = list(dict.fromkeys(names))
         self.styles = _styles(self.targets)
-        self.window_width = _positive(_median(self.col("window_width")), DEFAULT_WINDOW_WIDTH)
-        self.eval_max = _positive(_median(self.col("eval_max")), DEFAULT_EVAL_MAX)
+        self.eval_max = _median(self.col("eval_max"))
         self.cap = CAP_FACTOR * self.eval_max
-        self.beyond = f"beyond {_fmt(self.eval_max)}"
-        self.capped_note = f"{self.beyond} drawn at {_fmt(self.cap)}"
+        self.capped_note = f"beyond {_fmt(self.eval_max)} drawn at {_fmt(self.cap)}"
 
     def has(self, *cols: str) -> bool:
         return all(c in self.rows[0] for c in cols)
@@ -684,79 +537,13 @@ def plot_sweep(sweep_dir: Path) -> list[Path]:
         return []
     out = sweep_dir / "figures"
     out.mkdir(parents=True, exist_ok=True)
-    figures = (
-        _horizons_by_target,
-        _calibration,
-        _omega_error_by_target,
-        _noise_sweep,
-        _samples_sweep,
-        _baselines,
-    )
+    figures = (_calibration, _noise_sweep, _samples_sweep, _baselines)
     return _draw_all(figures, _Sweep(rows, out))
 
 
 def _beyond_region(ax: Any, s: _Sweep, axis: str = "x") -> None:
     span = ax.axvspan if axis == "x" else ax.axhspan
     span(s.eval_max, s.cap * 2.0, color=GRID, alpha=0.6, lw=0, zorder=0)
-
-
-def _horizons_by_target(s: _Sweep) -> Path | None:
-    if not s.has("target", "horizon_0.1"):
-        return None
-    h = s.col("horizon_0.1")
-    if np.isnan(h).all():
-        return None
-    finite = h[np.isfinite(h) & (h > 0)]
-    left = finite.min() / 3.0 if finite.size else s.eval_max / 10.0
-
-    path = s.out / "horizons_by_target.png"
-    title = "Extrapolation horizon per target and seed: first |x| band with NRMSE above 0.1"
-    with _figure(path, title, figsize=(7.5, 0.42 * len(s.targets) + 2.2)) as (fig, ax):
-        _beyond_region(ax, s)
-        for i, name in enumerate(s.targets):
-            v = h[s.is_target(name) & ~np.isnan(h)]
-            y = i + _spread(v.size, 0.22)
-            inf = np.isposinf(v)
-            ax.scatter(v[~inf], y[~inf], color=PALETTE[0], label="one seed", **DOT)
-            if inf.any():
-                ax.scatter(
-                    np.full(int(inf.sum()), s.cap),
-                    y[inf],
-                    marker=">",
-                    s=44,
-                    facecolors="none",
-                    edgecolors=PALETTE[0],
-                    linewidths=1.3,
-                    zorder=3,
-                    label=f"{s.beyond} (no band exceeded 0.1)",
-                )
-            if v.size:
-                med = min(float(np.median(v)), s.cap)
-                ax.plot(
-                    [med],
-                    [i],
-                    ls="none",
-                    marker="|",
-                    ms=16,
-                    mew=2,
-                    color=INK,
-                    zorder=4,
-                    label="median over seeds",
-                )
-        ax.annotate(
-            s.beyond,
-            xy=(s.cap, 1.0),
-            xycoords=("data", "axes fraction"),
-            ha="center",
-            va="bottom",
-            fontsize=8,
-            color=INK_2,
-        )
-        _category_axis(ax, s.targets, axis="y")
-        ax.set(xscale="log", xlim=(left, s.cap * 2.0))
-        ax.set_xlabel("horizon |x| (lower edge of the first band with NRMSE > 0.1)")
-        _legend(fig, [ax])
-    return path
 
 
 def _calibration(s: _Sweep) -> Path | None:
@@ -769,7 +556,7 @@ def _calibration(s: _Sweep) -> Path | None:
     if not ok.any():
         return None
     lo, hi = min(meas[ok].min(), pred[ok].min()) / 3.0, s.cap * 2.0
-    upper = np.minimum(s.col("horizon_0.1_upper"), s.cap)  # all NaN when the column is absent
+    upper = np.minimum(s.col("horizon_0.1_upper"), s.cap)
     banded = ok & np.isfinite(upper) & (upper > meas)
 
     path = s.out / "calibration.png"
@@ -830,42 +617,6 @@ def _calibration(s: _Sweep) -> Path | None:
     return path
 
 
-def _omega_error_by_target(s: _Sweep) -> Path | None:
-    if not s.has("target", "omega_rel_err"):
-        return None
-    raw = s.col("omega_rel_err")
-    if np.isnan(raw).all():
-        return None
-    err = np.maximum(np.abs(raw), NRMSE_FLOOR)
-    se = np.maximum(s.col("omega_rel_stderr"), NRMSE_FLOOR)  # all NaN when the column is absent
-
-    path = s.out / "omega_error_by_target.png"
-    title = "Achieved relative frequency error per run, beside the model's own standard error"
-    with _figure(path, title, figsize=(max(6.5, 0.55 * len(s.targets) + 2.5), 4.8)) as (fig, ax):
-        for i, name in enumerate(s.targets):
-            m = s.is_target(name)
-            x = i + _spread(int(m.sum()), 0.22)
-            ax.scatter(
-                x, err[m], color=PALETTE[0], label=r"achieved $|\hat\omega/\omega - 1|$", **DOT
-            )
-            if not np.isnan(se[m]).all():
-                ax.scatter(
-                    x,
-                    se[m],
-                    marker="_",
-                    s=90,
-                    color=INK_2,
-                    linewidths=1.6,
-                    zorder=4,
-                    label=r"model standard error SE($\hat\omega$)/$\omega$",
-                )
-        _category_axis(ax, s.targets)
-        ax.set_yscale("log")
-        ax.set_ylabel("relative frequency error (floored at 1e-16)")
-        _legend(fig, [ax], ncol=2)
-    return path
-
-
 def _median_lines(
     ax: Any, s: _Sweep, x: np.ndarray, y: np.ndarray, xpos: Callable[[np.ndarray], np.ndarray]
 ) -> None:
@@ -900,11 +651,12 @@ def _crb_line(ax: Any, s: _Sweep, noise: np.ndarray) -> None:
     """
     pos = noise[noise > 0]
     n = _median(s.col("n_samples"))
-    if pos.size == 0 or not (math.isfinite(n) and n > 0):
+    width = _median(s.col("window_width"))
+    if pos.size == 0 or not (math.isfinite(n) and n > 0 and math.isfinite(width) and width > 0):
         return
     omega = _positive(_median(s.col("omega_true")), 1.0)
     xs = np.geomspace(pos.min(), pos.max(), 50)
-    crb = xs * math.sqrt(24.0) / (math.sqrt(n) * s.window_width * omega)
+    crb = xs * math.sqrt(24.0) / (math.sqrt(n) * width * omega)
     ax.plot(xs, crb, color=INK_2, lw=1.2, ls=":", label=CRB_LABEL)
 
 
@@ -984,7 +736,7 @@ def _band_text(s: _Sweep, bands: dict[float, str], lo: float) -> str:
     """'1e3 ≤ |x| < 1e4' using the next band's lower edge, or eval_max for the last band."""
     edges = list(bands)
     i = edges.index(lo)
-    hi = edges[i + 1] if i + 1 < len(edges) else _median(s.col("eval_max"))
+    hi = edges[i + 1] if i + 1 < len(edges) else s.eval_max
     if math.isfinite(hi) and hi > lo:
         return f"{_fmt(lo)} ≤ |x| < {_fmt(hi)}"
     return f"the band starting at |x| = {_fmt(lo)}"

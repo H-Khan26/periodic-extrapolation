@@ -52,6 +52,7 @@ ignore = ["PLR0913", "PLR0917", "PLR2004", "PLR0911", "PLR0912", "PLR0915", "RUF
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR", "N806", "PLC0415"]
 "src/periodic/cli.py" = ["PLC0415"]  # subcommands import lazily so --help stays fast
+"src/periodic/models/baselines.py" = ["PLC0415"]  # scikit-learn loads only for the GP baseline
 
 [tool.mypy]
 python_version = "3.12"
@@ -63,4 +64,3 @@ no_implicit_optional = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["slow: long-running tests, deselected in the fast suite"]

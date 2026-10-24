@@ -1,4 +1,4 @@
-"""Extrapolation metrics: distance bands, horizons, period and phase error, spectra.
+"""Extrapolation metrics: distance bands, horizons, period and phase error.
 
 Evaluation is allowed to call the black-box target; inference is not. Everything here takes a
 ``predict`` callable and a ``truth`` callable so models and baselines are scored identically.
@@ -169,33 +169,6 @@ def omega_agreement(omega: float, omega_true: float) -> dict[str, float]:
         "ratio": ratio,
         "nearest_ratio": nearest,
         "rel_err_to_nearest": ratio / nearest - 1.0,
-    }
-
-
-def fourier_coefficients(fn: Fn, period: float, k_max: int, x0: float = 0.0) -> np.ndarray:
-    """Complex Fourier coefficients c_1..c_k_max of fn over one period starting at x0 (FFT).
-
-    Samples sit at half-cell offsets so a jump at x0 or x0 + period/2 is never sampled exactly;
-    the half-sample phase shift leaves the amplitudes unchanged. With 64 samples per harmonic
-    the aliasing error on a discontinuous target stays below 0.1 %.
-    """
-    n = 64 * k_max
-    x = x0 + (np.arange(n) + 0.5) * (period / n)
-    c = np.fft.rfft(fn(x)) / n
-    return c[1 : k_max + 1]
-
-
-def spectrum_comparison(
-    predict: Fn, truth: Fn, learned_period: float, true_period: float, k_max: int = 32
-) -> dict[str, Any]:
-    """Harmonic amplitudes of the learned function versus the truth, each over its own period."""
-    c_true = fourier_coefficients(truth, true_period, k_max)
-    c_pred = fourier_coefficients(predict, learned_period, k_max)
-    return {
-        "k": list(range(1, k_max + 1)),
-        "amp_true": (2.0 * np.abs(c_true)).tolist(),
-        "amp_pred": (2.0 * np.abs(c_pred)).tolist(),
-        "amp_abs_err": (2.0 * np.abs(c_pred - c_true)).tolist(),
     }
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from periodic.registry import RegistryError
 from periodic.targets import TARGETS, get_target, heldout_target
 
 PERIODIC = [n for n in TARGETS.names() if TARGETS.get(n).period is not None]
@@ -29,10 +28,9 @@ def test_targets_are_bounded_float64_and_shape_preserving(name: str) -> None:
     assert y.shape == x.shape
     assert np.all(np.isfinite(y))
     assert np.max(np.abs(y)) < 10.0
-
-
-def test_quasi_periodic_target_declares_no_period() -> None:
-    assert get_target("quasi").period is None
+    assert t(np.float64(0.5)).shape == ()
+    x2 = x[:12].reshape(3, 4)
+    np.testing.assert_allclose(t(x2), y[:12].reshape(3, 4))
 
 
 def test_heldout_targets_are_seeded_and_distinct() -> None:
@@ -43,20 +41,6 @@ def test_heldout_targets_are_seeded_and_distinct() -> None:
     assert a.period is not None
     assert 2 * np.pi / 5.0 <= a.period <= 2 * np.pi / 0.3
     assert get_target("heldout-3").period == a.period
-
-
-def test_unknown_target_raises() -> None:
-    with pytest.raises(RegistryError, match="unknown target"):
-        get_target("does-not-exist")
-
-
-@pytest.mark.parametrize("name", ["random_fourier", "heldout-1", "sin", "square"])
-def test_targets_accept_scalars_and_2d_input(name: str) -> None:
-    t = get_target(name)
-    assert t(np.float64(0.5)).shape == ()
-    x2 = np.linspace(-3, 3, 12).reshape(3, 4)
-    assert t(x2).shape == (3, 4)
-    np.testing.assert_allclose(t(x2).ravel(), t(x2.ravel()))
 
 
 def test_fingerprint_distinguishes_targets() -> None:

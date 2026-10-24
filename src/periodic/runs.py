@@ -1,7 +1,8 @@
-"""Run directories and environment capture."""
+"""Run directories, environment capture and JSON/CSV output."""
 
 from __future__ import annotations
 
+import csv
 import importlib.metadata
 import json
 import platform
@@ -76,8 +77,19 @@ class _Encoder(json.JSONEncoder):
 
 def write_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, indent=2, cls=_Encoder, allow_nan=True))
+    text = json.dumps(obj, indent=2, cls=_Encoder, allow_nan=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
+    """Write dict rows; the header is the union of their keys in first-seen order."""
+    keys = list(dict.fromkeys(k for r in rows for k in r))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys)
+        w.writeheader()
+        w.writerows(rows)

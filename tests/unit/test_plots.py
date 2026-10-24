@@ -11,18 +11,11 @@ import pytest
 
 from periodic import plots
 from periodic.plots import plot_run, plot_sweep
-from periodic.runs import write_json
-from periodic.sweep import flatten_row, write_csv
+from periodic.runs import write_csv, write_json
+from periodic.sweep import flatten_row
 
 EDGES = (10 * math.pi, 1e2, 1e3, 1e4, 1e5, 1e6)
-RUN_FIGURES = {
-    "error_vs_distance.png",
-    "overlays.png",
-    "phase_offset.png",
-    "spectrum.png",
-    "omega_landscape.png",
-    "train_fit.png",
-}
+RUN_FIGURES = {"error_vs_distance.png", "overlays.png", "omega_landscape.png"}
 
 
 @pytest.fixture(autouse=True)
@@ -56,8 +49,7 @@ def _model_result(nrmse_at: dict[float, float]) -> dict:
     }
 
 
-def _write_run(run_dir: Path, spectrum: bool = True, new_keys: bool = True) -> None:
-    """Synthetic run; new_keys=False writes the older schema without window, scan, upper."""
+def _write_run(run_dir: Path) -> None:
     stderr = 1e-9
     main = {lo: 1e-12 * lo for lo in EDGES[:-1]}
     main[EDGES[0]] = 0.0  # exercises the 1e-16 floor
@@ -69,39 +61,22 @@ def _write_run(run_dir: Path, spectrum: bool = True, new_keys: bool = True) -> N
     ev = {
         "target": "sin",
         "sigma": 0.01,
-        "noise_rel": 0.01,
         "scale": 1 / math.sqrt(2),
-        "head": "linear",
-        "period": {"learned": 2 * math.pi, "true": 2 * math.pi},
+        "window": {"x_min": -10 * math.pi, "x_max": 10 * math.pi, "width": 20 * math.pi},
         "omega": {
             "omega": 1.0 + 1e-10,
             "stderr": stderr,
-            "rel_stderr": stderr,
             "omega_true": 1.0,
             "rel_err": 1e-10,
         },
         "shape_gain": 1.0,
-        "predicted_horizons": {"0.1": 0.1 / stderr},
         "dense": dense,
-        "spectrum": None,
         "baselines": {
             "constant": _model_result(dict.fromkeys(EDGES[:-1], 1.0)),
             "oracle": _model_result(dict.fromkeys(EDGES[:-1], 1e-15)),
         },
         **_model_result(main),
     }
-    if spectrum:
-        k = np.arange(1, 9)
-        ev["spectrum"] = {
-            "k": k.tolist(),
-            "amp_true": np.where(k == 1, 1.0, 0.0).tolist(),
-            "amp_pred": np.where(k == 1, 1.0, 1e-14).tolist(),
-            "amp_abs_err": np.full(8, 1e-14).tolist(),
-        }
-    if new_keys:
-        ev["window"] = {"x_min": -10 * math.pi, "x_max": 10 * math.pi, "width": 20 * math.pi}
-        ev["amplitude"] = 1.0
-        ev["horizons_upper"] = {"0.1": math.inf}
     write_json(run_dir / "evaluation.json", ev)
 
     arrays: dict[str, np.ndarray] = {}
@@ -113,64 +88,43 @@ def _write_run(run_dir: Path, spectrum: bool = True, new_keys: bool = True) -> N
     grid = np.linspace(0.7, 1.3, 121)
     arrays["landscape_omega"] = grid
     arrays["landscape_mse"] = 1.0 - np.sinc((grid - 1.0) * 10.0) ** 2
-    rng = np.random.default_rng(0)
-    xs = np.sort(rng.uniform(-10 * math.pi, 10 * math.pi, 256))
-    arrays["train_x"] = xs
-    arrays["train_y"] = np.sin(xs) + 0.01 * rng.standard_normal(xs.size)
-    arrays["train_pred"] = np.sin(xs)
-    if new_keys:
-        scan_grid = np.arange(0.05, 20.0, 0.025)
-        arrays["scan_grid"] = scan_grid
-        arrays["scan_power"] = np.exp(-(((scan_grid - 1.0) / 0.03) ** 2))
-        arrays["scan_omega"] = scan_grid[scan_grid >= 0.1]
-        arrays["scan_score"] = sum(
-            np.exp(-(((arrays["scan_omega"] - 1.0 / k) / 0.03) ** 2)) / k for k in (1, 2, 3)
-        )
-        arrays["scan_candidates"] = np.array([1.0, 0.5, 1 / 3])
+    scan = np.arange(0.1, 20.0, 0.025)
+    arrays["scan_omega"] = scan
+    arrays["scan_score"] = sum(np.exp(-(((scan - 1.0 / k) / 0.03) ** 2)) / k for k in (1, 2, 3))
+    arrays["scan_candidates"] = np.array([1.0, 0.5, 1 / 3])
     np.savez(run_dir / "evaluation.npz", **arrays)
     write_json(run_dir / "metrics.json", {"omega_stderr": stderr, "harmonics": [1], "seed": 0})
 
 
-def test_plot_run_writes_six_figures(tmp_path: Path) -> None:
+def test_plot_run_writes_every_figure(tmp_path: Path) -> None:
     _write_run(tmp_path)
     paths = plot_run(tmp_path)
     assert {p.name for p in paths} == RUN_FIGURES
     assert all(p.parent == tmp_path / "figures" and p.stat().st_size > 0 for p in paths)
 
 
-def test_plot_run_old_schema_without_spectrum(tmp_path: Path) -> None:
-    _write_run(tmp_path, spectrum=False, new_keys=False)
-    names = {p.name for p in plot_run(tmp_path)}
-    assert names == RUN_FIGURES - {"spectrum.png"}
-
-
-def _strip_npz_and_omega(run_dir: Path) -> None:
-    (run_dir / "evaluation.npz").unlink()
-    ev_path = run_dir / "evaluation.json"
+def test_plot_run_with_missing_inputs_draws_what_it_can(tmp_path: Path) -> None:
+    _write_run(tmp_path)
+    (tmp_path / "evaluation.npz").unlink()
+    ev_path = tmp_path / "evaluation.json"
     ev = json.loads(ev_path.read_text())
     del ev["omega"]
     ev_path.write_text(json.dumps(ev))
-
-
-def test_plot_run_without_npz_or_omega_keeps_json_figures(tmp_path: Path) -> None:
-    _write_run(tmp_path)
-    _strip_npz_and_omega(tmp_path)
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # missing inputs skip figures quietly, nothing raises
         names = {p.name for p in plot_run(tmp_path)}
-    assert names == {"error_vs_distance.png", "phase_offset.png", "spectrum.png"}
+    assert names == {"error_vs_distance.png"}
 
 
 def test_plot_run_skips_a_failing_figure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def _spectrum(run: object) -> None:  # stands in for plots._spectrum
-        raise KeyError("amp_true")
+    def _overlays(run: object) -> None:  # stands in for plots._overlays
+        raise KeyError("dense")
 
     _write_run(tmp_path)
-    (tmp_path / "evaluation.npz").unlink()  # fewer figures to draw
-    monkeypatch.setattr(plots, "_spectrum", _spectrum)
-    with pytest.warns(UserWarning, match="skipped figure spectrum: KeyError"):
+    monkeypatch.setattr(plots, "_overlays", _overlays)
+    with pytest.warns(UserWarning, match="skipped figure overlays: KeyError"):
         names = {p.name for p in plot_run(tmp_path)}
-    assert names == {"error_vs_distance.png", "phase_offset.png"}
+    assert names == RUN_FIGURES - {"overlays.png"}
 
 
 def _metrics(seed: int, n_samples: int) -> dict:
@@ -188,7 +142,7 @@ def _metrics(seed: int, n_samples: int) -> dict:
     }
 
 
-def _evaluation(seed: int, target: str, noise_rel: float, new_keys: bool = True) -> dict:
+def _evaluation(seed: int, target: str, noise_rel: float) -> dict:
     periodic = target == "sin"
     horizon = math.inf if seed < 2 else 1e5
     ev = {
@@ -196,7 +150,7 @@ def _evaluation(seed: int, target: str, noise_rel: float, new_keys: bool = True)
         "omega": {"rel_stderr": 1e-9 * (1 + seed)},
         "shape_gain": 1.0,
         "train_window": {"nrmse": 1e-10},
-        "phase_horizon_0.1rad": 1e8,
+        "window": {"x_min": -10 * math.pi, "x_max": 10 * math.pi, "width": 20 * math.pi},
         "horizons": {"0.1": horizon if periodic else 1e2, "0.5": math.inf},
         "predicted_horizons": {
             "0.1": (1e8 if seed < 2 else 3e4) if periodic else math.inf,
@@ -213,16 +167,13 @@ def _evaluation(seed: int, target: str, noise_rel: float, new_keys: bool = True)
             }
         },
     }
+    ev["horizons_upper"] = {eps: 10 * h for eps, h in ev["horizons"].items()}
     if periodic:
         ev["omega"] |= {
             "omega_true": 1.0,
             "rel_err": (-1) ** seed * 1e-10 * (1 + seed),
             "ratio": 1.0,
         }
-    if new_keys:
-        ev["window"] = {"x_min": -10 * math.pi, "x_max": 10 * math.pi, "width": 20 * math.pi}
-        ev["amplitude"] = 1.0 if periodic else 0.5
-        ev["horizons_upper"] = {eps: 10 * h for eps, h in ev["horizons"].items()}
     if seed == 0:  # a run without the oracle leaves empty cells in its columns
         ev["baselines"]["oracle"] = {
             "horizons": {"0.1": math.inf},
@@ -242,23 +193,12 @@ def test_plot_sweep_writes_applicable_figures(tmp_path: Path, vary: str, extra: 
         for seed in range(3):
             noise = (0.0, 0.01, 0.1)[seed] if vary == "noise_rel" else 0.0
             n = (256, 1024, 4096)[seed] if vary == "n_samples" else 4096
-            ev = _evaluation(seed, target, noise, new_keys=vary != "none")
+            ev = _evaluation(seed, target, noise)
             rows.append(flatten_row(_metrics(seed, n), ev, target, f"runs/{target}-{seed}"))
-    if vary == "none":  # an older results.csv without the config-derived columns
-        for row in rows:
-            for col in ("window_width", "eval_max", "amplitude"):
-                row.pop(col, None)
     write_csv(rows, tmp_path / "results.csv")
-    assert "nan" in (tmp_path / "results.csv").read_text()
 
     paths = plot_sweep(tmp_path)
-    base = {
-        "horizons_by_target.png",
-        "calibration.png",
-        "omega_error_by_target.png",
-        "baselines.png",
-    }
-    assert {p.name for p in paths} == base | extra
+    assert {p.name for p in paths} == {"calibration.png", "baselines.png"} | extra
     assert all(p.stat().st_size > 0 for p in paths)
 
 
