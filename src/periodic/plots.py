@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import font_manager
 from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import NullLocator
 
 from periodic.report import read_results
@@ -55,11 +56,43 @@ KNOWN_MODELS = (
     "rff",
     "gp_periodic",
 )
+MODEL_LABELS = {
+    MAIN: "main model",
+    "oracle": "oracle (true ω)",
+    "harmonic_random_init": "ablation: random ω start",
+    "harmonic_offset_init": "ablation: ω start 1-5 basins off",
+    "constant": "constant (mean)",
+    "relu_mlp": "ReLU MLP",
+    "snake": "Snake MLP",
+    "rff": "random Fourier features",
+    "gp_periodic": "periodic-kernel GP",
+}
+# Short display names, matching the README's results table; held-out series are labelled apart.
+TARGET_LABELS = {
+    "sin": "sin x",
+    "harmonics3": "3 harmonics",
+    "missing_fundamental": "missing fundamental",
+    "bumps": "bump train",
+    "bessel": "Bessel spectrum",
+    "triangle": "triangle",
+    "abs_sin": "abs(sin x)",
+    "clipped": "clipped sine",
+    "square": "square",
+    "sawtooth": "sawtooth",
+    "pwm20": "20 % pulse",
+    "sin30": "sin 30x",
+    "sin_eighth": "sin x/8",
+    "one_cycle": "one cycle",
+    "scaled": "5 + 0.01 sin x",
+    "random_fourier": "random Fourier series",
+    "quasi": "sin x + sin √2 x",
+}
 NRMSE_FLOOR = 1e-16
 CAP_FACTOR = 3.0  # values beyond the evaluated range are drawn at CAP_FACTOR * eval_max
 PREFERRED_BAND_LO = 1e3  # the baselines figure uses the band whose lower edge is closest to this
 RANDOM_PHASE = math.sqrt(2.0)
-CRB_LABEL = "Cramér\N{EN DASH}Rao bound, pure sinusoid (reference)"
+CRB_LABEL = "best possible for a pure sine: Cramér\N{EN DASH}Rao bound, as a median"
+MEDIAN_ABS_NORMAL = 0.6745  # median of |e| / sigma for Gaussian e
 DOT: dict[str, Any] = {"s": 36, "edgecolors": SURFACE, "linewidths": 1.0, "zorder": 3}
 # Malformed inputs (missing keys, nulls, ragged arrays) raise these; they skip one figure only.
 SKIPPABLE = (KeyError, IndexError, TypeError, ValueError, FileNotFoundError)
@@ -163,7 +196,13 @@ def model_styles(names: Iterable[str]) -> dict[str, Style]:
 
 
 def _model_label(name: str) -> str:
-    return "main model" if name == MAIN else name
+    return MODEL_LABELS.get(name, name)
+
+
+def _target_label(name: str) -> str:
+    if name.startswith("heldout-"):
+        return "held-out " + name.removeprefix("heldout-")
+    return TARGET_LABELS.get(name, name)
 
 
 def _fmt(v: float) -> str:
@@ -314,7 +353,8 @@ def _error_vs_distance(run: _Run) -> Path | None:
     ylim = (min(lows) / 3.0, max(RANDOM_PHASE, *ys) * 3.0)
 
     path = run.out / "error_vs_distance.png"
-    title = f"Extrapolation error against distance from the origin: {ev.get('target', '')}"
+    target = _target_label(str(ev.get("target", "")))
+    title = f"Extrapolation error against distance from the origin: {target}"
     with _figure(path, title, figsize=(7.5, 5.2)) as (fig, ax):
         for name, (x, y) in curves.items():
             color, marker = run.styles[name]
@@ -334,37 +374,31 @@ def _error_vs_distance(run: _Run) -> Path | None:
 
 def _overlays(run: _Run) -> Path | None:
     parts = ("x", "truth", "pred")
+    # Windows at x >= 0 only: the -x side tells the same story with the phase error mirrored.
     rows = [
         r
         for r in run.ev.get("dense") or []
         if isinstance(r, dict)
-        and math.isfinite(_num(r, "center"))
+        and _num(r, "center") >= 0
         and all(f"dense_{r.get('tag')}_{p}" in run.arrays for p in parts)
     ]
     if not rows:
         return None
-    ncols = 2 if any(_num(r, "center") < 0 for r in rows) else 1
-    grid: dict[float, list[dict[str, Any] | None]] = {}
-    for r in rows:
-        c = _num(r, "center")
-        grid.setdefault(abs(c), [None] * ncols)[0 if ncols == 1 or c < 0 else 1] = r
+    rows.sort(key=lambda r: _num(r, "center"))
+    ncols = min(2, len(rows))
+    nrows = math.ceil(len(rows) / ncols)
 
     path = run.out / "overlays.png"
-    title = "Truth and prediction in short windows near and far from the training data"
-    if ncols == 2:
-        title += "\nleft: windows at -x, right: windows at +x"
-    size = (8.5 if ncols == 2 else 5.0, 1.9 * len(grid) + 1.3)
+    target = _target_label(str(run.ev.get("target", "")))
+    title = f"Truth and prediction near and far from the training data: {target}"
+    size = (8.5 if ncols == 2 else 5.0, 2.4 * nrows + 1.2)
     with _figure(
-        path, title, nrows=len(grid), ncols=ncols, sharey=True, squeeze=False, figsize=size
+        path, title, nrows=nrows, ncols=ncols, sharey=True, squeeze=False, figsize=size
     ) as (fig, axes):
-        for panel_row, cells in zip(axes, grid.values(), strict=True):
-            for ax, cell in zip(panel_row, cells, strict=True):
-                if cell is None:
-                    ax.set_visible(False)
-                    continue
-                _overlay_panel(run, ax, cell)
-                if cells[0] is None:
-                    ax.yaxis.set_tick_params(labelleft=True)
+        for ax, row in zip(axes.flat, rows, strict=False):
+            _overlay_panel(run, ax, row)
+        for ax in axes.flat[len(rows) :]:
+            ax.set_visible(False)
         for col in range(ncols):
             visible = [ax for ax in axes[:, col] if ax.get_visible()]
             if visible:
@@ -383,7 +417,10 @@ def _overlay_panel(run: _Run, ax: Any, row: dict[str, Any]) -> None:
     nrmse, phase = _num(row, "nrmse"), _num(row, "phase_offset_rad")
     nrmse_txt = f"{nrmse:.2g}" if math.isfinite(nrmse) else "n/a"
     phase_txt = f"{phase:+.2g} rad" if math.isfinite(phase) else "n/a"
-    ax.set_title(f"centre {_fmt(c)}   NRMSE {nrmse_txt}   phase {phase_txt}")
+    window = _dict(run.ev.get("window"))
+    inside = _num(window, "x_min") <= c <= _num(window, "x_max")
+    where = f"x ≈ {_fmt(c)}" + (" (training data)" if inside else "")
+    ax.set_title(f"{where}   NRMSE {nrmse_txt}   phase error {phase_txt}")
 
 
 def _omega_landscape(run: _Run) -> Path | None:
@@ -445,7 +482,7 @@ def _scan_panel(run: _Run, ax: Any, omega: np.ndarray, score: np.ndarray) -> Non
             edgecolors=INK,
             linewidths=1.2,
             zorder=4,
-            label="refined candidates",
+            label=f"candidates: the {cand.size} highest scan peaks",
         )
     ax.set_xscale("log")
     ax.set_xlim(omega.min(), omega.max())
@@ -460,16 +497,17 @@ def _zoom_panel(run: _Run, ax: Any, omega: np.ndarray, mse: np.ndarray) -> None:
     label = f"profiled MSE ({k} harmonic{'s' if k != 1 else ''})" if k else "profiled MSE"
     ax.plot(omega, mse, color=run.color, lw=1.2, label=label)
     ax.set_yscale("log")
-    ax.set_ylim(float(np.nanmin(mse)) / 3.0, float(np.nanmax(mse)) * 30.0)  # bar headroom
+    bottom, peak = float(np.nanmin(mse)) / 3.0, float(np.nanmax(mse))
+    ax.set_ylim(bottom, peak * (peak / bottom) ** 0.25)  # curve below 80 % height, bar above it
     ax.ticklabel_format(axis="x", useOffset=False)
-    _resolution_bar(run, ax)
-    ax.set_title("zoom: the loss basin spans only about ±2π/L around the estimate")
+    _basin_bar(run, ax)
+    ax.set_title("zoom: the loss basin around the estimate is no wider than about ±2π/L")
     ax.set_xlabel("ω (rad per unit x)")
     ax.set_ylabel("profiled MSE (standardised target)")
 
 
-def _resolution_bar(run: _Run, ax: Any) -> None:
-    """Horizontal bar of width 2π/L centred on the estimated ω (L: training window width)."""
+def _basin_bar(run: _Run, ax: Any) -> None:
+    """Horizontal bar over ±2π/L around the estimated ω (L: training window width)."""
     omega_hat = _num(run.omega, "omega")
     width = _num(_dict(run.ev.get("window")), "width")
     if not (math.isfinite(omega_hat) and math.isfinite(width) and width > 0):
@@ -478,15 +516,15 @@ def _resolution_bar(run: _Run, ax: Any) -> None:
     coords = ("data", "axes fraction")
     ax.annotate(
         "",
-        xy=(omega_hat - res / 2, 0.9),
-        xytext=(omega_hat + res / 2, 0.9),
+        xy=(omega_hat - res, 0.9),
+        xytext=(omega_hat + res, 0.9),
         xycoords=coords,
         textcoords=coords,
         arrowprops={"arrowstyle": "|-|", "color": INK_2, "lw": 1.0, "shrinkA": 0, "shrinkB": 0},
     )
     ax.annotate(
-        f"resolution 2π/L = {res:.3g}",
-        xy=(omega_hat + res / 2, 0.9),
+        f"±2π/L = ±{res:.3g}",
+        xy=(omega_hat + res, 0.9),
         xycoords=coords,
         xytext=(6, 0),
         textcoords="offset points",
@@ -541,42 +579,60 @@ def plot_sweep(sweep_dir: Path) -> list[Path]:
     return _draw_all(figures, _Sweep(rows, out))
 
 
-def _beyond_region(ax: Any, s: _Sweep, axis: str = "x") -> None:
+def _beyond_region(ax: Any, s: _Sweep, axis: str = "x", label: str | None = None) -> None:
     span = ax.axvspan if axis == "x" else ax.axhspan
-    span(s.eval_max, s.cap * 2.0, color=GRID, alpha=0.6, lw=0, zorder=0)
+    span(s.eval_max, s.cap * 2.0, color=GRID, alpha=0.6, lw=0, zorder=0, label=label)
 
 
 def _calibration(s: _Sweep) -> Path | None:
     if not s.has("target", "horizon_0.1", "predicted_horizon_0.1"):
         return None
     meas, pred = s.col("horizon_0.1"), s.col("predicted_horizon_0.1")
+    upper = s.col("horizon_0.1_upper")
     capped = (meas >= s.cap) | (pred >= s.cap)
-    meas, pred = np.minimum(meas, s.cap), np.minimum(pred, s.cap)
-    ok = np.isfinite(meas) & np.isfinite(pred) & (meas > 0) & (pred > 0)
+    banded = np.isfinite(upper) & (upper > meas) & (meas > 0) & (meas < s.cap)
+    # A run sits at the centre of its failing band, so it lands inside that band's square on the
+    # diagonal exactly when the predicted horizon falls inside the measured band.
+    x = np.where(banded, np.sqrt(np.abs(meas * upper)), np.minimum(meas, s.cap))
+    pred = np.minimum(pred, s.cap)
+    ok = np.isfinite(x) & np.isfinite(pred) & (x > 0) & (pred > 0)
     if not ok.any():
         return None
-    lo, hi = min(meas[ok].min(), pred[ok].min()) / 3.0, s.cap * 2.0
-    upper = np.minimum(s.col("horizon_0.1_upper"), s.cap)
-    banded = ok & np.isfinite(upper) & (upper > meas)
+    lo, hi = min(np.where(banded, meas, x)[ok].min(), pred[ok].min()) / 3.0, s.cap * 2.0
+    squares = sorted(set(zip(meas[ok & banded], upper[ok & banded], strict=True)))
+    if (ok & (meas >= s.cap) & (pred >= s.eval_max)).any():
+        squares.append((s.eval_max, hi))
+    n = len(s.targets)
+    step = min(0.06, 0.3 / max(n - 1, 1))  # decades between targets inside one band
 
     path = s.out / "calibration.png"
     title = "Predicted against measured extrapolation horizon (NRMSE 0.1), one point per run"
-    with _figure(path, title, figsize=(7.5, 6.6)) as (fig, ax):
+    with _figure(path, title, figsize=(7.5, 6.8)) as (fig, ax):
         _beyond_region(ax, s, "x")
         _beyond_region(ax, s, "y")
+        square_label = "measured failing band: a run inside its square is calibrated"
+        for j, (a, b) in enumerate(squares):
+            label = square_label if j == 0 else None
+            ax.add_patch(
+                Rectangle((a, a), b - a, b - a, fc="none", ec=INK_2, lw=0.9, zorder=1, label=label)
+            )
         ax.plot(
-            [lo, hi], [lo, hi], color=INK_2, lw=0.9, ls="--", label="identity: predicted = measured"
+            [lo, hi], [lo, hi], color=MUTED, lw=0.9, ls="--", label="identity: predicted = measured"
         )
-        for name in s.targets:
+        for i, name in enumerate(s.targets):
             m = ok & s.is_target(name)
+            px = x * 10.0 ** (step * (i - (n - 1) / 2))
             color, marker = s.styles[name]
-            b = m & banded
-            ax.hlines(pred[b], meas[b], upper[b], color=color, lw=1.4, alpha=0.6, zorder=2)
             ax.scatter(
-                meas[m & ~capped], pred[m & ~capped], color=color, marker=marker, label=name, **DOT
+                px[m & ~capped],
+                pred[m & ~capped],
+                color=color,
+                marker=marker,
+                label=_target_label(name),
+                **DOT,
             )
             ax.scatter(
-                meas[m & capped],
+                px[m & capped],
                 pred[m & capped],
                 marker=marker,
                 s=40,
@@ -584,15 +640,6 @@ def _calibration(s: _Sweep) -> Path | None:
                 edgecolors=color,
                 linewidths=1.3,
                 zorder=3,
-            )
-        if banded.any():
-            ax.plot(
-                [],
-                [],
-                color=INK_2,
-                lw=1.4,
-                alpha=0.6,
-                label="line: rest of the failing band",
             )
         if (ok & capped).any():
             ax.scatter(
@@ -604,15 +651,17 @@ def _calibration(s: _Sweep) -> Path | None:
                 edgecolors=INK_2,
                 label=f"hollow: capped at {_fmt(s.cap)}",
             )
+        note = {"fontsize": 8, "color": INK_2}
+        above = "above the squares: optimistic, fails sooner than predicted"
+        below = "below the squares: conservative, holds longer than predicted"
+        ax.text(lo * 1.6, s.eval_max / 1.6, above, va="top", **note)
+        ax.text(s.eval_max / 1.6, lo * 1.6, below, ha="right", **note)
         ax.set(xscale="log", yscale="log", xlim=(lo, hi), ylim=(lo, hi))
         ax.set_xlabel(
-            "measured horizon |x|: first band with NRMSE > 0.1, dot at its lower edge"
+            "measured horizon |x|: first band with NRMSE > 0.1, dot at its centre"
             f" ({s.capped_note})"
         )
-        cap = _fmt(s.cap)
-        ax.set_ylabel(
-            rf"predicted horizon 0.1 / ($\sigma_\omega$ · gain) (≥ {cap} and inf drawn at {cap})"
-        )
+        ax.set_ylabel(f"predicted horizon |x| from the error bar on ω ({s.capped_note})")
         _legend(fig, [ax])
     return path
 
@@ -620,7 +669,11 @@ def _calibration(s: _Sweep) -> Path | None:
 def _median_lines(
     ax: Any, s: _Sweep, x: np.ndarray, y: np.ndarray, xpos: Callable[[np.ndarray], np.ndarray]
 ) -> None:
-    """Per target: median of y at each x with interquartile whiskers, dodged slightly in x."""
+    """Per target: median of y at each x with interquartile bars, dodged slightly in x.
+
+    The line joins positive x only, so an x = 0 column (noiseless runs) stands apart. A median of
+    zero has no place on a log axis and is left out; callers say so where it matters.
+    """
     n = len(s.targets)
     for i, name in enumerate(s.targets):
         m = s.is_target(name) & np.isfinite(x) & ~np.isnan(y)
@@ -630,10 +683,16 @@ def _median_lines(
         q = np.array(
             [np.quantile(y[m & (x == v)], [0.25, 0.5, 0.75], method="nearest") for v in xs]
         )
-        px = xpos(xs) * 10.0 ** (0.012 * (i - (n - 1) / 2))
+        px = xpos(xs) * 10.0 ** (0.025 * (i - (n - 1) / 2))
         color, marker = s.styles[name]
-        ax.vlines(px, q[:, 0], q[:, 2], color=color, lw=1.2)
-        ax.plot(px, q[:, 1], color=color, marker=marker, mec=SURFACE, mew=1.0, label=name)
+        shown = q[:, 1] > 0
+        px, xs, q = px[shown], xs[shown], q[shown]
+        low = np.where(q[:, 0] > 0, q[:, 0], q[:, 1])
+        bars = [q[:, 1] - low, q[:, 2] - q[:, 1]]
+        ax.errorbar(px, q[:, 1], yerr=bars, fmt="none", ecolor=color, elinewidth=1.0, capsize=2.5)
+        style = {"color": color, "marker": marker, "mec": SURFACE, "mew": 1.0}
+        ax.plot(px[xs > 0], q[xs > 0, 1], label=_target_label(name), **style)
+        ax.plot(px[xs <= 0], q[xs <= 0, 1], ls="none", **style)
 
 
 def _value_ticks(ax: Any, values: np.ndarray, xpos: Callable[[np.ndarray], np.ndarray]) -> None:
@@ -643,11 +702,13 @@ def _value_ticks(ax: Any, values: np.ndarray, xpos: Callable[[np.ndarray], np.nd
 
 
 def _crb_line(ax: Any, s: _Sweep, noise: np.ndarray) -> None:
-    """Reference Cramér-Rao bound on the relative ω error of a pure sinusoid.
+    """Median relative ω error of an estimator at the Cramér-Rao bound for a pure sinusoid.
 
-    sqrt(24) sigma / (A sqrt(N) L omega) with sigma = noise_rel * A (how the data noise is
-    scaled), so the amplitude cancels. Targets with harmonics carry more Fisher information about
-    ω and can sit below this line: it is a reference, not a per-target bound.
+    The bound on the standard deviation is sqrt(24) sigma / (A sqrt(N) L omega) with
+    sigma = noise_rel * A (how the data noise is scaled), so the amplitude cancels. It is drawn
+    as the median of |error| it implies, which is what the plotted points are. Targets with
+    harmonics carry more Fisher information about ω and can sit below this line: it is a
+    reference, not a per-target bound.
     """
     pos = noise[noise > 0]
     n = _median(s.col("n_samples"))
@@ -656,8 +717,25 @@ def _crb_line(ax: Any, s: _Sweep, noise: np.ndarray) -> None:
         return
     omega = _positive(_median(s.col("omega_true")), 1.0)
     xs = np.geomspace(pos.min(), pos.max(), 50)
-    crb = xs * math.sqrt(24.0) / (math.sqrt(n) * width * omega)
+    crb = MEDIAN_ABS_NORMAL * xs * math.sqrt(24.0) / (math.sqrt(n) * width * omega)
     ax.plot(xs, crb, color=INK_2, lw=1.2, ls=":", label=CRB_LABEL)
+
+
+def _exact_note(ax: Any, s: _Sweep, x: np.ndarray, y: np.ndarray, at: float) -> None:
+    """Name the targets whose median at x = 0 is exactly zero, which a log axis cannot show."""
+    exact = [_target_label(t) for t in s.targets if _median(y[s.is_target(t) & (x == 0)]) == 0]
+    if exact:
+        text = "noiseless:\n" + "\n".join(exact) + "\nexact (0)"
+        ax.text(
+            at,
+            0.04,
+            text,
+            transform=ax.get_xaxis_transform(),
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            color=INK_2,
+        )
 
 
 def _noise_sweep(s: _Sweep) -> Path | None:
@@ -670,27 +748,32 @@ def _noise_sweep(s: _Sweep) -> Path | None:
     def xpos(v: np.ndarray) -> np.ndarray:
         return np.where(v > 0, v, zero_at)
 
-    err = np.maximum(np.abs(s.col("omega_rel_err")), NRMSE_FLOOR)
+    err = np.abs(s.col("omega_rel_err"))
     path = s.out / "noise_sweep.png"
-    title = "Frequency error and extrapolation horizon against observation noise"
-    with _figure(path, title, ncols=2, figsize=(10.5, 4.6)) as (fig, (left, right)):
+    title = (
+        "Frequency error and extrapolation horizon against observation noise"
+        "\nmedian over seeds; bars span the middle half of the seeds"
+    )
+    with _figure(path, title, ncols=2, figsize=(10.5, 4.8)) as (fig, (left, right)):
         _median_lines(left, s, noise, err, xpos)
         _crb_line(left, s, noise)
-        left.set_title("relative frequency error, median and IQR over seeds")
-        left.set_ylabel(r"$|\hat\omega/\omega - 1|$ (floored at 1e-16)")
+        _exact_note(left, s, noise, err, zero_at)
+        left.set_title("error in the learned frequency")
+        left.set_ylabel(r"relative frequency error $|\hat\omega/\omega - 1|$")
         if s.has("horizon_0.1"):
             h = s.col("horizon_0.1")
-            _beyond_region(right, s, "y")
+            beyond = f"no failure up to {_fmt(s.eval_max)} (drawn at {_fmt(s.cap)})"
+            _beyond_region(right, s, "y", label=beyond)
             _median_lines(right, s, noise, np.where(np.isposinf(h), s.cap, h), xpos)
-            right.set_title("horizon at NRMSE 0.1, median and IQR over seeds")
-            right.set_ylabel(f"horizon |x| ({s.capped_note})")
+            right.set_title("extrapolation horizon: start of the first band with NRMSE above 0.1")
+            right.set_ylabel("horizon |x|")
         else:
             right.set_visible(False)
         for ax in (left, right):
             ax.set(xscale="log", yscale="log")
             _value_ticks(ax, noise, xpos)
-            ax.set_xlabel(r"noise_rel ($\sigma$ / amplitude)")
-        _legend(fig, (left, right), ncol=4)
+            ax.set_xlabel(r"noise level ($\sigma$ / signal amplitude; 0 = noiseless)")
+        _legend(fig, (left, right), ncol=3)
     return path
 
 
@@ -752,20 +835,28 @@ def _baselines(s: _Sweep) -> Path | None:
     cols = {MAIN: key} | {c[: -len(suffix)]: c for c in s.rows[0] if c.endswith(suffix)}
     styles = model_styles(n for n in cols if n != MAIN)
     width = 0.8 / len(cols)
+    main = np.maximum(s.col(key), NRMSE_FLOOR)
+    main_med = {t: _median(main[s.is_target(t)]) for t in s.targets}
+    targets = sorted(s.targets, key=lambda t: (math.isnan(main_med[t]), main_med[t]))
 
     path = s.out / "baselines.png"
-    title = f"Median NRMSE over {_band_text(s, bands, lo)} per target, main model and baselines"
-    size = (min(12.0, max(7.5, 0.18 * len(cols) * len(s.targets) + 3.0)), 5.2)
+    title = (
+        f"Median NRMSE over {_band_text(s, bands, lo)} per target, main model and baselines"
+        "\ntargets sorted by the main model's error"
+    )
+    size = (min(11.0, max(7.5, 0.18 * len(cols) * len(targets) + 3.0)), 5.6)
     with _figure(path, title, figsize=size) as (fig, ax):
         for j, name in enumerate(styles):
             vals = np.maximum(s.col(cols[name]), NRMSE_FLOOR)
-            med = [_median(vals[s.is_target(t)]) for t in s.targets]
-            x = np.arange(len(s.targets)) + (j - (len(cols) - 1) / 2) * width
+            med = [_median(vals[s.is_target(t)]) for t in targets]
+            x = np.arange(len(targets)) + (j - (len(cols) - 1) / 2) * width
             color, marker = styles[name]
             ax.scatter(x, med, color=color, marker=marker, label=_model_label(name), **DOT)
+        for edge in np.arange(len(targets) - 1) + 0.5:
+            ax.axvline(edge, color=GRID, lw=0.8, zorder=0)
         _reference_lines(ax)
-        _category_axis(ax, s.targets)
+        _category_axis(ax, [_target_label(t) for t in targets])
         ax.set_yscale("log")
         ax.set_ylabel("median NRMSE over seeds (floored at 1e-16)")
-        _legend(fig, [ax])
+        _legend(fig, [ax], ncol=5 if size[0] >= 10.0 else 3)
     return path

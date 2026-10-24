@@ -8,7 +8,7 @@ import pytest
 
 from periodic.cli import main
 from periodic.config import load_config
-from periodic.evaluate import evaluate_run
+from periodic.evaluate import evaluate_run, load_run_config
 from periodic.runs import read_json
 from periodic.train import train
 
@@ -58,7 +58,9 @@ def test_evaluation_arrays_cover_windows_and_landscape(evaluated_run: tuple[Path
         keys = set(z.files)
         assert {"landscape_omega", "landscape_mse", "scan_omega", "scan_score"} <= keys
         assert "dense_pos_0_x" in keys and "dense_neg_1e+06_pred" in keys
-        assert np.any(np.isclose(z["scan_candidates"], ev["omega"]["omega"], rtol=1e-3))
+        # Candidates are scan-grid peaks, so the true one lies within a grid step of ω.
+        step = 2 * np.pi / ev["window"]["width"] / load_run_config(run_dir).spectral.oversample
+        assert np.min(np.abs(z["scan_candidates"] - ev["omega"]["omega"])) <= step
         omega = z["landscape_omega"]
         mse = z["landscape_mse"]
         i = int(np.argmin(mse))

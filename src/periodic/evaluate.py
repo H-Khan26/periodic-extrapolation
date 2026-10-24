@@ -102,6 +102,7 @@ def _omega_landscape(
     omega_min: float,
     omega_max: float,
     k_scan: int,
+    oversample: int,
 ) -> dict[str, np.ndarray]:
     """Loss landscape in ω: a local zoom of the profiled MSE and the global harmonic-sum scan.
 
@@ -113,7 +114,7 @@ def _omega_landscape(
     grid = grid[grid > 0]
     z = (y - np.mean(y)) / (np.std(y) or 1.0)
     mse = np.array([profile_mse(x, z, w, ks, x_center) for w in grid])
-    omegas, score = harmonic_sum_scan(x, z, omega_min, omega_max, res, oversample=4, k_scan=k_scan)
+    omegas, score = harmonic_sum_scan(x, z, omega_min, omega_max, res, oversample, k_scan)
     return {
         "landscape_omega": grid,
         "landscape_mse": mse,
@@ -165,9 +166,11 @@ def evaluate_run(run_dir: Path, seed: int = 1234, verbose: bool = True) -> dict[
             float(omega_json["omega_min"]),
             float(omega_json["omega_max"]),
             min(cfg.spectral.k_scan, max_harmonics(ds.n)),  # the bank the estimator used
+            cfg.spectral.oversample,  # and its grid, so the scan peaks are the candidates
         )
     )
-    arrays["scan_candidates"] = np.array([c["omega"] for c in omega_json["candidates"]])
+    # Scan peaks the candidates started from, before variable projection moved them.
+    arrays["scan_candidates"] = np.array([c["omega0"] for c in omega_json["candidates"]])
 
     # Only the baselines this run's config asked for are scored, so a reused run directory
     # cannot leak stale baselines into the report; a skipped oracle simply has no directory.
